@@ -12,6 +12,8 @@ public interface IChatSession : IDisposable
 
     event EventHandler? Disconnected;
 
+    event EventHandler<ListenFailedEventArgs>? ListenFailed;
+
     Task ListenAsync(int port, CancellationToken cancellationToken);
 
     Task ConnectAsync(IPAddress ipAddress, int port, CancellationToken cancellationToken);

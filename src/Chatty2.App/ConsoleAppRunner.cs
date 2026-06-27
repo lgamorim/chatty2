@@ -31,6 +31,7 @@ public sealed class ConsoleAppRunner
         session.MessageReceived += OnMessageReceived;
         session.PeerConnected += OnPeerConnected;
         session.Disconnected += OnDisconnected;
+        session.ListenFailed += OnListenFailed;
     }
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)
@@ -54,6 +55,7 @@ public sealed class ConsoleAppRunner
             session.MessageReceived -= OnMessageReceived;
             session.PeerConnected -= OnPeerConnected;
             session.Disconnected -= OnDisconnected;
+            session.ListenFailed -= OnListenFailed;
             session.Dispose();
         }
     }
@@ -131,6 +133,9 @@ public sealed class ConsoleAppRunner
         WriteInfo("Peer disconnected.");
         _ = session.ListenAsync(listeningPort, cancellationToken);
     }
+
+    private void OnListenFailed(object? sender, ListenFailedEventArgs e) =>
+        WriteError($"Stopped listening for incoming connections: {e.Exception.Message}");
 
     private void WriteInfo(string message) => WriteLine(output, message, ConsoleColor.Yellow, () => Console.IsOutputRedirected);
 

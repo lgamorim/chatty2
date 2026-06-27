@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Chatty2.Core;
@@ -123,6 +124,20 @@ public class ConsoleAppRunnerTests
         Assert.Contains("hi there", text);
         Assert.Contains("10.0.0.2:53000", text);
         Assert.Contains("disconnected", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Should_WriteErrorMessage_When_ListenFailedEventRaised()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
+
+        session.ListenFailed += Raise.EventWith(new ListenFailedEventArgs(new SocketException()));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("Stopped listening", output.ToString());
     }
 
     [Fact]

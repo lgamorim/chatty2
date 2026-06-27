@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Chatty2.Core;
@@ -209,6 +210,62 @@ public class ChatSessionTests
         await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.False(session.IsConnected);
+    }
+
+    [Fact]
+    public async Task Should_RaiseListenFailedAndNotFault_When_AcceptAsync_ThrowsNonCancellationException()
+    {
+        var listener = Substitute.For<IPeerListener>();
+        var failure = new SocketException();
+        listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<IPeerConnection>(failure));
+
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>());
+        ListenFailedEventArgs? raisedArgs = null;
+        session.ListenFailed += (_, e) => raisedArgs = e;
+
+        // Must complete normally (not fault) even though AcceptAsync threw - every real
+        // caller invokes ListenAsync fire-and-forget, so a faulted task here would
+        // otherwise go unobserved and silently kill listening.
+        await session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(raisedArgs);
+        Assert.Same(failure, raisedArgs!.Exception);
+        Assert.False(session.IsConnected);
+    }
+
+    [Fact]
+    public async Task Should_WaitForPriorAttemptToFinish_When_ListenAsync_CalledAgainWhilePriorAttemptStillPending()
+    {
+        var listener = Substitute.For<IPeerListener>();
+        var firstAcceptTcs = new TaskCompletionSource<IPeerConnection>();
+        var secondConnection = CreatePendingConnection("peer");
+        var acceptCallCount = 0;
+
+        listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                acceptCallCount++;
+                return acceptCallCount == 1 ? firstAcceptTcs.Task : Task.FromResult(secondConnection);
+            });
+
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>());
+
+        var firstListen = session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None);
+        var secondListen = session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None);
+
+        // The second attempt must wait for the first attempt's TcpListener to finish
+        // tearing down (its own AcceptAsync call to complete) rather than racing it by
+        // calling AcceptAsync again immediately.
+        Assert.Equal(1, acceptCallCount);
+
+        firstAcceptTcs.TrySetCanceled(TestContext.Current.CancellationToken);
+        await firstListen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await secondListen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, acceptCallCount);
+        Assert.True(session.IsConnected);
     }
 
     [Fact]

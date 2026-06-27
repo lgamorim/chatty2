@@ -115,6 +115,18 @@ only the send side is shut down.
   raises a `Disconnected` event. `ConsoleAppRunner` reacts to that event (and to a failed
   `/connect`) by calling `ListenAsync` again, which is what makes the "auto-resume listening"
   behavior work without `ChatSession` needing any retry/restart logic of its own.
+- `ListenAsync` is always invoked fire-and-forget by its callers, so any exception that escaped
+  it (e.g. a `SocketException` from `TcpListener.Start()` because the port is already in use)
+  would otherwise go unobserved — listening would die silently with no feedback. `ListenAsync`
+  catches every non-cancellation failure and raises a `ListenFailed` event instead of letting it
+  fault the task; `ConsoleAppRunner` surfaces that as a visible error message.
+- Each call to `ListenAsync` first awaits the *previous* listen attempt's own completion before
+  binding the port again. This matters because re-arming can happen immediately after
+  `ConnectAsync` cancels an in-flight listen (e.g. `ConnectCommand` re-arming right after a failed
+  dial) — the prior `TcpListener`'s teardown runs asynchronously in its own `finally` block, and
+  binding before that teardown finishes can throw "address already in use" (which, pre-fix, was
+  exactly the kind of failure point 1 left unobserved). Chaining each attempt behind the last one
+  closes that race without requiring any change at the call sites.
 
 ### Command pattern
 

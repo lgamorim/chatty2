@@ -9,6 +9,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     private readonly Lock gate = new();
     private IPeerConnection? activeConnection;
     private CancellationTokenSource? listenCts;
+    private Task previousListenAttempt = Task.CompletedTask;
     private bool disposed;
 
     public bool IsConnected
@@ -28,8 +29,34 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
     public event EventHandler? Disconnected;
 
-    public async Task ListenAsync(int port, CancellationToken cancellationToken)
+    public event EventHandler<ListenFailedEventArgs>? ListenFailed;
+
+    public Task ListenAsync(int port, CancellationToken cancellationToken)
     {
+        Task priorAttempt;
+        lock (gate)
+        {
+            priorAttempt = previousListenAttempt;
+        }
+
+        var attempt = ListenCoreAsync(port, cancellationToken, priorAttempt);
+
+        lock (gate)
+        {
+            previousListenAttempt = attempt;
+        }
+
+        return attempt;
+    }
+
+    private async Task ListenCoreAsync(int port, CancellationToken cancellationToken, Task priorAttempt)
+    {
+        // A re-arm (e.g. right after a failed /connect, or after a disconnect) can be
+        // requested before the previous attempt's TcpListener has finished releasing the
+        // port in its own teardown. Waiting for it here avoids racing that release and
+        // binding too early.
+        await WaitWithoutThrowingAsync(priorAttempt);
+
         listenCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = listenCts.Token;
 
@@ -44,6 +71,14 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             {
                 return;
             }
+            catch (Exception exception)
+            {
+                // Every caller invokes ListenAsync fire-and-forget, so any exception that
+                // escapes here would otherwise go unobserved and listening would die
+                // silently. Surface it instead so the failure is visible and recoverable.
+                ListenFailed?.Invoke(this, new ListenFailedEventArgs(exception));
+                return;
+            }
 
             try
             {
@@ -56,6 +91,19 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                 // simultaneous-connect race). The candidate was already disposed by Claim;
                 // keep listening for a legitimate future peer.
             }
+        }
+    }
+
+    private static async Task WaitWithoutThrowingAsync(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch
+        {
+            // A prior listen attempt's own failure is already surfaced via ListenFailed;
+            // it must not fault this attempt too.
         }
     }
 
