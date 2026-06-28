@@ -72,6 +72,40 @@ public class TcpPeerConnectionIntegrationTests
     }
 
     [Fact]
+    public async Task Should_NotEmitUtf8Bom_When_SendingFirstMessage()
+    {
+        var port = GetFreeLoopbackPort();
+        var rawListener = new TcpListener(IPAddress.Loopback, port);
+        rawListener.Start();
+
+        var clientSocket = new TcpClient();
+        await clientSocket.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        using var peerConnection = new TcpPeerConnection(clientSocket);
+
+        using var serverClient = await rawListener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+        rawListener.Stop();
+
+        await peerConnection.SendAsync("hello", CancellationToken.None);
+
+        // Reading the raw bytes off the wire (bypassing StreamReader's own BOM handling
+        // on the receiving end) is the only way to actually prove no BOM preamble was
+        // sent - a 3-byte EF BB BF prefix here would push "hello" out of the first 5
+        // bytes read.
+        var buffer = new byte[5];
+        var stream = serverClient.GetStream();
+        var totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(totalRead), TestContext.Current.CancellationToken);
+            if (read == 0) break;
+            totalRead += read;
+        }
+
+        Assert.Equal(5, totalRead);
+        Assert.Equal("hello"u8.ToArray(), buffer);
+    }
+
+    [Fact]
     public async Task Should_PreserveLineBoundaries_When_SendingRapidConsecutiveMessages()
     {
         var port = GetFreeLoopbackPort();

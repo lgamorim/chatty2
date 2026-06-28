@@ -57,8 +57,20 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         // binding too early.
         await WaitWithoutThrowingAsync(priorAttempt);
 
-        listenCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var token = listenCts.Token;
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        CancellationTokenSource? previousCts;
+        lock (gate)
+        {
+            previousCts = listenCts;
+            listenCts = cts;
+        }
+
+        // The attempt that owned previousCts has already completed by this point (we just
+        // awaited it above), so it's no longer in use - safe to dispose without yanking a
+        // token out from under a live AcceptAsync call.
+        previousCts?.Dispose();
+
+        var token = cts.Token;
 
         while (!token.IsCancellationRequested)
         {
@@ -111,7 +123,19 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     {
         ArgumentNullException.ThrowIfNull(ipAddress);
 
-        listenCts?.Cancel();
+        CancellationTokenSource? cts;
+        lock (gate)
+        {
+            // Fail fast before tearing down listening or dialing out: Claim would reject
+            // this anyway once the candidate connection comes back, but only after the
+            // target peer has already seen a connect followed immediately by a disconnect.
+            if (activeConnection is not null)
+                throw new InvalidOperationException("Already connected to a peer.");
+
+            cts = listenCts;
+        }
+
+        cts?.Cancel();
 
         var candidate = await connector.ConnectAsync(ipAddress, port, cancellationToken);
         Claim(candidate);
@@ -146,14 +170,17 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         if (disposed) return;
         disposed = true;
 
-        listenCts?.Cancel();
-        listenCts?.Dispose();
-
+        CancellationTokenSource? cts;
         lock (gate)
         {
+            cts = listenCts;
+            listenCts = null;
             activeConnection?.Dispose();
             activeConnection = null;
         }
+
+        cts?.Cancel();
+        cts?.Dispose();
     }
 
     private void Claim(IPeerConnection candidate)

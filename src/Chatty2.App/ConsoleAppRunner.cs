@@ -147,9 +147,14 @@ public sealed class ConsoleAppRunner
         {
             if (!isRedirected()) Console.ForegroundColor = color;
 
-            writer.WriteLine(message);
-
-            if (!isRedirected()) Console.ForegroundColor = ConsoleColor.White;
+            try
+            {
+                writer.WriteLine(message);
+            }
+            finally
+            {
+                if (!isRedirected()) Console.ForegroundColor = ConsoleColor.White;
+            }
         }
     }
 }

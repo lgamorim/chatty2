@@ -89,12 +89,15 @@ test/
 ### Transport: TCP with a line-delimited text protocol
 
 Each side of a connection wraps a `TcpClient`'s `NetworkStream` in a `StreamReader`/`StreamWriter`
-pair and exchanges messages one line at a time (`IPeerConnection.SendAsync`/`ReceiveAsync`). A
-`null` return from `ReceiveAsync` means the stream ended cleanly; `TcpPeerConnection.Dispose()`
-explicitly shuts down only the send direction (`SocketShutdown.Send`) before closing, so the
-remote side observes a clean end-of-stream instead of an abortive "connection reset" — shutting
-down both directions was tried first and produced the abortive RST behavior instead, which is why
-only the send side is shut down.
+pair and exchanges messages one line at a time (`IPeerConnection.SendAsync`/`ReceiveAsync`), using
+a UTF-8 encoding configured not to emit a BOM preamble (`Encoding.UTF8` would otherwise write a
+3-byte marker ahead of the very first message — harmless here only because `StreamReader`'s
+default BOM detection strips it back out on the receiving end, but there's no reason to put it on
+the wire over a raw socket in the first place). A `null` return from `ReceiveAsync` means the
+stream ended cleanly; `TcpPeerConnection.Dispose()` explicitly shuts down only the send direction
+(`SocketShutdown.Send`) before closing, so the remote side observes a clean end-of-stream instead
+of an abortive "connection reset" — shutting down both directions was tried first and produced
+the abortive RST behavior instead, which is why only the send side is shut down.
 
 ### Connection lifecycle and the listen/connect race
 
@@ -109,6 +112,11 @@ only the send side is shut down.
   case where both peers dial each other simultaneously), the connection that arrives second is
   rejected and disposed, and whichever loop lost keeps going (the listener keeps accepting; a
   failed `/connect` re-arms listening) — first connection wins, nothing is left in a stuck state.
+  `ConnectAsync` also checks up front whether it's already connected and fails fast in that case,
+  *before* tearing down listening or dialing out — without that check, a `/connect` while already
+  connected would still cancel listening and open a real `TcpClient` to the target only to reject
+  and dispose it a moment later, so the target peer would see a stray connect immediately followed
+  by a disconnect for no reason.
 - A dropped connection — whether the peer closed cleanly, the network died, or the local user ran
   `/disconnect` — is funneled through one code path: the receive loop treats both a clean `null`
   and any exception from `ReceiveAsync` as "disconnected," clears the active connection, and

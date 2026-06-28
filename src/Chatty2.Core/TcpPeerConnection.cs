@@ -5,6 +5,11 @@ namespace Chatty2.Core;
 
 public sealed class TcpPeerConnection : IPeerConnection
 {
+    // Encoding.UTF8 emits a 3-byte BOM preamble before the first write; over a raw
+    // socket there's no file/stream header convention expecting that, so use a UTF-8
+    // encoding instance configured not to emit it.
+    private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+
     private readonly TcpClient client;
     private readonly StreamReader reader;
     private readonly StreamWriter writer;
@@ -16,8 +21,8 @@ public sealed class TcpPeerConnection : IPeerConnection
 
         this.client = client;
         var stream = client.GetStream();
-        reader = new StreamReader(stream, Encoding.UTF8);
-        writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+        reader = new StreamReader(stream, Utf8WithoutBom);
+        writer = new StreamWriter(stream, Utf8WithoutBom) { AutoFlush = true };
         RemoteEndPoint = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
     }
 

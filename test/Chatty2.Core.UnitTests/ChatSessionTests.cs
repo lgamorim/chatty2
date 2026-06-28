@@ -50,20 +50,58 @@ public class ChatSessionTests
     }
 
     [Fact]
-    public async Task Should_ThrowInvalidOperationExceptionAndDisposeCandidate_When_ConnectAsync_CalledWhileAlreadyConnected()
+    public async Task Should_ThrowInvalidOperationExceptionWithoutDialing_When_ConnectAsync_CalledWhileAlreadyConnected()
     {
         var connector = Substitute.For<IPeerConnector>();
         var firstConnection = CreatePendingConnection("first");
-        var secondConnection = Substitute.For<IPeerConnection>();
 
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(firstConnection), Task.FromResult(secondConnection));
+            .Returns(Task.FromResult(firstConnection));
 
         var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
         await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None));
+
+        // The second call must short-circuit before dialing out at all - otherwise the
+        // target peer would see a stray connect immediately followed by a disconnect.
+        await connector.Received(1).ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        firstConnection.DidNotReceive().Dispose();
+    }
+
+    [Fact]
+    public async Task Should_RejectWhicheverClaimsSecond_When_BothConnectAsyncCallsDialConcurrentlyBeforeEitherClaims()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var firstConnectTcs = new TaskCompletionSource<IPeerConnection>();
+        var secondConnectTcs = new TaskCompletionSource<IPeerConnection>();
+        var firstConnection = CreatePendingConnection("first");
+        var secondConnection = Substitute.For<IPeerConnection>();
+        var dialCallCount = 0;
+
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                dialCallCount++;
+                return dialCallCount == 1 ? firstConnectTcs.Task : secondConnectTcs.Task;
+            });
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+
+        // Both calls pass the early "not connected yet" check and start dialing before
+        // either has claimed the slot - the rare genuinely-concurrent /connect race the
+        // early check (added for the common sequential case above) can't catch on its
+        // own. Claim() is still the final backstop that resolves it correctly.
+        var firstCall = session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        var secondCall = session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        Assert.Equal(2, dialCallCount);
+
+        firstConnectTcs.SetResult(firstConnection);
+        await firstCall;
+
+        secondConnectTcs.SetResult(secondConnection);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => secondCall);
 
         secondConnection.Received(1).Dispose();
         firstConnection.DidNotReceive().Dispose();
@@ -116,6 +154,37 @@ public class ChatSessionTests
 
         await session.ListenAsync(ChatSession.DefaultPort, cts.Token).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
+        Assert.False(session.IsConnected);
+    }
+
+    [Fact]
+    public async Task Should_SupportRepeatedReArming_When_ListenAsync_CalledManyTimesInSuccession()
+    {
+        // Each call creates a new linked CancellationTokenSource and disposes the
+        // previous one; calling this many times in a row (as a long-lived session with
+        // several reconnects would) must keep working without leaking into a broken
+        // state or throwing on an already-disposed source.
+        var listener = Substitute.For<IPeerListener>();
+        var acceptCallCount = 0;
+        listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                acceptCallCount++;
+                return Task.FromCanceled<IPeerConnection>(callInfo.ArgAt<CancellationToken>(1));
+            });
+
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>());
+
+        // Cancellation happens during each accept (not before calling ListenAsync) so
+        // the loop actually reaches AcceptAsync every time, exercising the
+        // create-then-dispose-previous CTS path on each re-arm.
+        for (var i = 0; i < 5; i++)
+        {
+            await session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(5, acceptCallCount);
         Assert.False(session.IsConnected);
     }
 

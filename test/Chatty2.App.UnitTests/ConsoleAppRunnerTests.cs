@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Chatty2.Core;
@@ -232,5 +233,29 @@ public class ConsoleAppRunnerTests
         Assert.Contains("/connect", text);
         Assert.Contains("Goodbye", text);
         await session.Received(1).SendAsync("hello", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Should_PropagateExceptionWithoutSwallowingIt_When_OutputWriterThrowsDuringWrite()
+    {
+        // The write is wrapped in try/finally (so the color reset still runs even if the
+        // write itself throws); this guards against that restructuring accidentally
+        // swallowing the original exception instead of letting it propagate.
+        var session = Substitute.For<IChatSession>();
+        var error = new StringWriter();
+        var input = new StringReader("/help\n");
+        var runner = new ConsoleAppRunner([new HelpCommand()], session, ChatSession.DefaultPort, input, new ThrowingTextWriter(), error);
+
+        var exitCode = await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("broken pipe", error.ToString());
+    }
+
+    private sealed class ThrowingTextWriter : TextWriter
+    {
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void WriteLine(string? value) => throw new IOException("broken pipe");
     }
 }
