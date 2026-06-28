@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <OutputType>Exe</OutputType>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+        <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\..\src\Chatty2.App\Chatty2.App.csproj" />
+      <ProjectReference Include="..\..\src\Chatty2.Core\Chatty2.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="coverlet.collector" Version="10.0.1">
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        <PrivateAssets>all</PrivateAssets>
+      </PackageReference>
+      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+      <PackageReference Include="NSubstitute" Version="5.3.0" />
+      <PackageReference Include="xunit.v3" Version="3.2.2" />
+    </ItemGroup>
+
+</Project>

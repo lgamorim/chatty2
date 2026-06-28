@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Chatty2.App/Chatty2.App.csproj" />
+    <Project Path="src/Chatty2.Core/Chatty2.Core.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Chatty2.App.UnitTests/Chatty2.App.UnitTests.csproj" />
+    <Project Path="test/Chatty2.Core.IntegrationTests/Chatty2.Core.IntegrationTests.csproj" />
+    <Project Path="test/Chatty2.Core.UnitTests/Chatty2.Core.UnitTests.csproj" />
+  </Folder>
+</Solution>
