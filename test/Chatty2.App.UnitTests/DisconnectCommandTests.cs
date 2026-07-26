@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using Chatty2.Core;
 using NSubstitute;
 using Xunit;

@@ -41,8 +41,8 @@ csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
 csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
 
 # Remove unnecessary using directives. IDE0005-on-build requires
-# GenerateDocumentationFile, which the test project omits (test-project
-# exemption); it is scoped back to `suggestion` for tests below.
+# GenerateDocumentationFile, which Directory.Build.props sets for every project
+# including tests, so this applies solution-wide.
 dotnet_diagnostic.IDE0005.severity = warning
 
 # `this.` is not used.
@@ -63,7 +63,9 @@ dotnet_naming_symbols.types.applicable_accessibilities = *
 dotnet_naming_symbols.non_field_members.applicable_kinds = property, method, event
 dotnet_naming_symbols.non_field_members.applicable_accessibilities = *
 
-dotnet_naming_symbols.constants.applicable_kinds = field, local
+# `field` only, not `local`: coding-standards.md lists constants among members.
+# Local consts stay camelCase and fall through to the parameters_locals rule.
+dotnet_naming_symbols.constants.applicable_kinds = field
 dotnet_naming_symbols.constants.required_modifiers = const
 
 # `private static readonly` values are constant-like and stay PascalCase per
@@ -124,10 +126,3 @@ dotnet_naming_rule.non_field_members_are_pascal_case.severity = warning
 dotnet_naming_rule.parameters_locals_are_camel_case.symbols = parameters_locals
 dotnet_naming_rule.parameters_locals_are_camel_case.style = camel_case
 dotnet_naming_rule.parameters_locals_are_camel_case.severity = warning
-
-# --- Test-project override ---
-# Test projects don't set GenerateDocumentationFile (their public types exist
-# only for test discovery), which IDE0005-on-build requires. Keep it a
-# non-blocking suggestion here; all other rules above still apply.
-[test/**/*.cs]
-dotnet_diagnostic.IDE0005.severity = suggestion

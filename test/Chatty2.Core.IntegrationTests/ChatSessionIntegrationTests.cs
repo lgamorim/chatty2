@@ -1,9 +1,5 @@
-using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading;
-using System.Threading.Tasks;
-using Chatty2.Core;
 using Xunit;
 
 namespace Chatty2.Core.IntegrationTests;

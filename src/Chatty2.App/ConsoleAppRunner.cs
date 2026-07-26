@@ -86,13 +86,13 @@ public sealed class ConsoleAppRunner
         var parts = line[1..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0)
         {
-            WriteError("Please specify a command. Type /help for a list of _commands.");
+            WriteError("Please specify a command. Type /help for a list of commands.");
             return false;
         }
 
         if (!_commands.TryGetValue(parts[0], out var command))
         {
-            WriteError($"Unknown command '/{parts[0]}'. Type /help for a list of _commands.");
+            WriteError($"Unknown command '/{parts[0]}'. Type /help for a list of commands.");
             return false;
         }
 
