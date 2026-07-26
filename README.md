@@ -5,6 +5,17 @@ _A console app for messaging another computer on the same local network (alpha).
 Chatty2 is a peer-to-peer LAN chat tool. Anything you type without a leading `/` is sent as a
 message to whichever peer you're currently connected to. Anything starting with `/` is a command.
 
+## Why this exists
+
+This project is an experiment as much as an app. I wanted to see how different
+Claude models perform in distinct roles — one writing, one reviewing — on a
+lower-level problem than the usual web or CLI fare. Network programming was a
+good fit: raw sockets punish sloppiness, and the connection lifecycle has enough
+edge cases (listen/dial races, half-open sockets, ungraceful disconnects) that
+review has something real to bite on.
+
+The chat app is the vehicle. The workflow is what I was actually testing.
+
 ## Rules
 
 - Two computers chat directly over TCP — there is no server, account, or internet connection
