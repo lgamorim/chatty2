@@ -206,3 +206,8 @@ session (`IChatSession`) respectively, so they run instantly with no real socket
 `Chatty2.Core.IntegrationTests` is the one deliberate exception: it exercises real loopback TCP
 sockets end-to-end, because a substituted `IPeerConnection` can't catch real-world socket behavior
 like the abortive-close issue described above.
+
+## Acknowledgments
+
+Built with Claude on a two-model workflow: Sonnet writes the implementation,
+Opus peer reviews every pull request before it merges.
