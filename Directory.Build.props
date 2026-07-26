@@ -1,0 +1,33 @@
+<Project>
+
+  <!--
+    Shared MSBuild properties for every project in the solution, per
+    .claude/rules/core/architecture.md (centralize TargetFramework, Nullable,
+    TreatWarningsAsErrors, etc.) and .claude/rules/core/coding-standards.md
+    (nullable on, warnings and style violations fail the build).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!--
+      IsPackable is false everywhere: this repo follows the `application`
+      archetype, so the deliverable is the running app, not a package.
+    -->
+    <IsPackable>false</IsPackable>
+
+    <!--
+      IDE0005 (remove unnecessary usings) only runs at build time when a
+      documentation file is generated. Generating one also turns on CS1591
+      (missing XML comment), which archetype/application.md explicitly relaxes
+      for an app boundary — so suppress CS1591 rather than let enabling one
+      diagnostic smuggle in the other.
+    -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

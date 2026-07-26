@@ -206,12 +206,12 @@ public class ConsoleAppRunnerTests
     public async Task Should_StartListening_WithConfiguredPort_NotHardcodedDefault()
     {
         var session = Substitute.For<IChatSession>();
-        const int configuredPort = 61234;
-        var runner = new ConsoleAppRunner([new ExitCommand()], session, configuredPort, new StringReader("/exit\n"), new StringWriter(), new StringWriter());
+        const int ConfiguredPort = 61234;
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ConfiguredPort, new StringReader("/exit\n"), new StringWriter(), new StringWriter());
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
-        await session.Received(1).ListenAsync(configuredPort, Arg.Any<CancellationToken>());
+        await session.Received(1).ListenAsync(ConfiguredPort, Arg.Any<CancellationToken>());
     }
 
     [Fact]
