@@ -4,14 +4,14 @@ namespace Chatty2.App;
 
 public sealed class ConsoleAppRunner
 {
-    private readonly Dictionary<string, ICommand> commands;
-    private readonly IChatSession session;
-    private readonly int listeningPort;
-    private readonly TextReader input;
-    private readonly TextWriter output;
-    private readonly TextWriter error;
-    private readonly Lock outputLock = new();
-    private CancellationToken cancellationToken;
+    private readonly Dictionary<string, ICommand> _commands;
+    private readonly IChatSession _session;
+    private readonly int _listeningPort;
+    private readonly TextReader _input;
+    private readonly TextWriter _output;
+    private readonly TextWriter _error;
+    private readonly Lock _outputLock = new();
+    private CancellationToken _cancellationToken;
 
     public ConsoleAppRunner(
         IEnumerable<ICommand> commands,
@@ -21,22 +21,22 @@ public sealed class ConsoleAppRunner
         TextWriter output,
         TextWriter error)
     {
-        this.commands = commands.ToDictionary(command => command.Name, StringComparer.OrdinalIgnoreCase);
-        this.session = session;
-        this.listeningPort = listeningPort;
-        this.input = input;
-        this.output = output;
-        this.error = error;
+        _commands = commands.ToDictionary(command => command.Name, StringComparer.OrdinalIgnoreCase);
+        _session = session;
+        _listeningPort = listeningPort;
+        _input = input;
+        _output = output;
+        _error = error;
 
-        session.MessageReceived += OnMessageReceived;
-        session.PeerConnected += OnPeerConnected;
-        session.Disconnected += OnDisconnected;
-        session.ListenFailed += OnListenFailed;
+        _session.MessageReceived += OnMessageReceived;
+        _session.PeerConnected += OnPeerConnected;
+        _session.Disconnected += OnDisconnected;
+        _session.ListenFailed += OnListenFailed;
     }
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)
     {
-        this.cancellationToken = cancellationToken;
+        _cancellationToken = cancellationToken;
 
         try
         {
@@ -44,7 +44,7 @@ public sealed class ConsoleAppRunner
         }
         catch (Exception exception)
         {
-            WriteLine(error, exception.Message, ConsoleColor.Red, () => Console.IsErrorRedirected);
+            WriteLine(_error, exception.Message, ConsoleColor.Red, () => Console.IsErrorRedirected);
             return 1;
         }
         finally
@@ -52,21 +52,21 @@ public sealed class ConsoleAppRunner
             // Unsubscribe before disposing: disposing the session ends any active
             // connection, which would otherwise raise Disconnected one more time and
             // print a spurious notice (and trigger a pointless re-listen) after exit.
-            session.MessageReceived -= OnMessageReceived;
-            session.PeerConnected -= OnPeerConnected;
-            session.Disconnected -= OnDisconnected;
-            session.ListenFailed -= OnListenFailed;
-            session.Dispose();
+            _session.MessageReceived -= OnMessageReceived;
+            _session.PeerConnected -= OnPeerConnected;
+            _session.Disconnected -= OnDisconnected;
+            _session.ListenFailed -= OnListenFailed;
+            _session.Dispose();
         }
     }
 
     private async Task<int> RunLoopAsync()
     {
-        _ = session.ListenAsync(listeningPort, cancellationToken);
+        _ = _session.ListenAsync(_listeningPort, _cancellationToken);
 
         while (true)
         {
-            var line = input.ReadLine();
+            var line = _input.ReadLine();
             if (line is null) return 0;
             if (string.IsNullOrWhiteSpace(line)) continue;
 
@@ -90,13 +90,13 @@ public sealed class ConsoleAppRunner
             return false;
         }
 
-        if (!commands.TryGetValue(parts[0], out var command))
+        if (!_commands.TryGetValue(parts[0], out var command))
         {
             WriteError($"Unknown command '/{parts[0]}'. Type /help for a list of commands.");
             return false;
         }
 
-        var result = await command.ExecuteAsync(parts[1..], cancellationToken);
+        var result = await command.ExecuteAsync(parts[1..], _cancellationToken);
         if (result.Message is not null)
         {
             if (result.IsError) WriteError(result.Message);
@@ -108,7 +108,7 @@ public sealed class ConsoleAppRunner
 
     private async Task SendMessageAsync(string message)
     {
-        if (!session.IsConnected)
+        if (!_session.IsConnected)
         {
             WriteError("Not connected to a peer. Use /connect <ip-address> <port> to start a conversation.");
             return;
@@ -116,7 +116,7 @@ public sealed class ConsoleAppRunner
 
         try
         {
-            await session.SendAsync(message, cancellationToken);
+            await _session.SendAsync(message, _cancellationToken);
         }
         catch (Exception)
         {
@@ -131,19 +131,19 @@ public sealed class ConsoleAppRunner
     private void OnDisconnected(object? sender, EventArgs e)
     {
         WriteInfo("Peer disconnected.");
-        _ = session.ListenAsync(listeningPort, cancellationToken);
+        _ = _session.ListenAsync(_listeningPort, _cancellationToken);
     }
 
     private void OnListenFailed(object? sender, ListenFailedEventArgs e) =>
         WriteError($"Stopped listening for incoming connections: {e.Exception.Message}");
 
-    private void WriteInfo(string message) => WriteLine(output, message, ConsoleColor.Yellow, () => Console.IsOutputRedirected);
+    private void WriteInfo(string message) => WriteLine(_output, message, ConsoleColor.Yellow, () => Console.IsOutputRedirected);
 
-    private void WriteError(string message) => WriteLine(output, message, ConsoleColor.Red, () => Console.IsOutputRedirected);
+    private void WriteError(string message) => WriteLine(_output, message, ConsoleColor.Red, () => Console.IsOutputRedirected);
 
     private void WriteLine(TextWriter writer, string message, ConsoleColor color, Func<bool> isRedirected)
     {
-        lock (outputLock)
+        lock (_outputLock)
         {
             if (!isRedirected()) Console.ForegroundColor = color;
 

@@ -1,9 +1,5 @@
-using System;
-using System.IO;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Chatty2.Core;
 using NSubstitute;
 using Xunit;
@@ -64,7 +60,20 @@ public class ConsoleAppRunnerTests
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
-        Assert.Contains("Unknown command", output.ToString());
+        Assert.Contains("Unknown command '/foo'. Type /help for a list of commands.", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_WriteFriendlyError_When_SlashEnteredWithoutCommandName()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var input = new StringReader("/\n/exit\n");
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, input, output, new StringWriter());
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("Please specify a command. Type /help for a list of commands.", output.ToString());
     }
 
     [Fact]

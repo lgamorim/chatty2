@@ -6,19 +6,19 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 {
     public const int DefaultPort = 53000;
 
-    private readonly Lock gate = new();
-    private IPeerConnection? activeConnection;
-    private CancellationTokenSource? listenCts;
-    private Task previousListenAttempt = Task.CompletedTask;
-    private bool disposed;
+    private readonly Lock _gate = new();
+    private IPeerConnection? _activeConnection;
+    private CancellationTokenSource? _listenCts;
+    private Task _previousListenAttempt = Task.CompletedTask;
+    private bool _disposed;
 
     public bool IsConnected
     {
         get
         {
-            lock (gate)
+            lock (_gate)
             {
-                return activeConnection is not null;
+                return _activeConnection is not null;
             }
         }
     }
@@ -34,16 +34,16 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     public Task ListenAsync(int port, CancellationToken cancellationToken)
     {
         Task priorAttempt;
-        lock (gate)
+        lock (_gate)
         {
-            priorAttempt = previousListenAttempt;
+            priorAttempt = _previousListenAttempt;
         }
 
         var attempt = ListenCoreAsync(port, cancellationToken, priorAttempt);
 
-        lock (gate)
+        lock (_gate)
         {
-            previousListenAttempt = attempt;
+            _previousListenAttempt = attempt;
         }
 
         return attempt;
@@ -59,10 +59,10 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         CancellationTokenSource? previousCts;
-        lock (gate)
+        lock (_gate)
         {
-            previousCts = listenCts;
-            listenCts = cts;
+            previousCts = _listenCts;
+            _listenCts = cts;
         }
 
         // The attempt that owned previousCts has already completed by this point (we just
@@ -124,15 +124,15 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         ArgumentNullException.ThrowIfNull(ipAddress);
 
         CancellationTokenSource? cts;
-        lock (gate)
+        lock (_gate)
         {
             // Fail fast before tearing down listening or dialing out: Claim would reject
             // this anyway once the candidate connection comes back, but only after the
             // target peer has already seen a connect followed immediately by a disconnect.
-            if (activeConnection is not null)
+            if (_activeConnection is not null)
                 throw new InvalidOperationException("Already connected to a peer.");
 
-            cts = listenCts;
+            cts = _listenCts;
         }
 
         cts?.Cancel();
@@ -146,9 +146,9 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         ArgumentNullException.ThrowIfNull(message);
 
         IPeerConnection connection;
-        lock (gate)
+        lock (_gate)
         {
-            connection = activeConnection ?? throw new InvalidOperationException("Not connected to a peer.");
+            connection = _activeConnection ?? throw new InvalidOperationException("Not connected to a peer.");
         }
 
         return connection.SendAsync(message, cancellationToken);
@@ -157,9 +157,9 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     public void Disconnect()
     {
         IPeerConnection connection;
-        lock (gate)
+        lock (_gate)
         {
-            connection = activeConnection ?? throw new InvalidOperationException("Not connected to a peer.");
+            connection = _activeConnection ?? throw new InvalidOperationException("Not connected to a peer.");
         }
 
         connection.Dispose();
@@ -167,16 +167,16 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
     public void Dispose()
     {
-        if (disposed) return;
-        disposed = true;
+        if (_disposed) return;
+        _disposed = true;
 
         CancellationTokenSource? cts;
-        lock (gate)
+        lock (_gate)
         {
-            cts = listenCts;
-            listenCts = null;
-            activeConnection?.Dispose();
-            activeConnection = null;
+            cts = _listenCts;
+            _listenCts = null;
+            _activeConnection?.Dispose();
+            _activeConnection = null;
         }
 
         cts?.Cancel();
@@ -185,15 +185,15 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
     private void Claim(IPeerConnection candidate)
     {
-        lock (gate)
+        lock (_gate)
         {
-            if (activeConnection is not null)
+            if (_activeConnection is not null)
             {
                 candidate.Dispose();
                 throw new InvalidOperationException("Already connected to a peer.");
             }
 
-            activeConnection = candidate;
+            _activeConnection = candidate;
         }
 
         PeerConnected?.Invoke(this, new PeerConnectedEventArgs(candidate.RemoteEndPoint));
@@ -223,9 +223,9 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         }
         finally
         {
-            lock (gate)
+            lock (_gate)
             {
-                if (ReferenceEquals(activeConnection, connection)) activeConnection = null;
+                if (ReferenceEquals(_activeConnection, connection)) _activeConnection = null;
             }
 
             connection.Dispose();
