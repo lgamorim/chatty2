@@ -50,18 +50,27 @@ Two instances on one machine: run each with a different `--port`, then `/connect
 @.claude/rules/core/testing-philosophy.md
 @.claude/rules/core/workflow-core.md
 @.claude/rules/overlays/workflow-team.md
+@.claude/rules/overlays/workflow-agent-review.md
 @.claude/rules/archetype/application.md
 
-These are copied from the shared [claude-rules](https://github.com/lgamorim/claude-rules)
-repository via its `tools/sync.ps1`, composed as `application-solo -Workflow team`. Because that
-combination matches no profile, the modules are imported directly rather than through a profile
-manifest. Re-audit for drift from the claude-rules checkout with:
+These are copied file-by-file from the shared [claude-rules](https://github.com/lgamorim/claude-rules)
+repository, composed as the `application` archetype under `team` workflow posture, plus
+`overlays/workflow-agent-review.md` (this repo runs a standing two-model implement/review flow
+over every PR — see `overlays/workflow-agent-review.md` for the contract between those two roles).
+That combination matches no single profile in `profiles/`, so the modules are copied directly
+rather than through `tools/sync.ps1 -Profile` (which only resolves an exact profile match; it
+no longer accepts an ad-hoc `-Workflow` override). Re-audit for drift from the claude-rules
+checkout with a per-file hash comparison:
 
 ```powershell
-./tools/sync.ps1 -Target <path-to>\chatty2 -Profile application-solo -Workflow team -Check
+Get-ChildItem -Recurse -File .claude\rules | ForEach-Object {
+    $rel = $_.FullName.Substring((Resolve-Path .claude\rules).Path.Length)
+    $src = Join-Path <path-to>\claude-rules\.claude\rules $rel
+    if (-not (Test-Path $src)) { "ORPHAN $rel" }
+    elseif ((Get-FileHash $_.FullName).Hash -ne (Get-FileHash $src).Hash) { "DRIFT  $rel" }
+    else { "OK     $rel" }
+}
 ```
-
-Pass those exact flags — `-Check` cannot infer how the set was composed.
 
 ## Project-specific notes
 
@@ -72,6 +81,11 @@ Pass those exact flags — `-Check` cannot infer how the set was composed.
 - **Workflow posture is `team`.** `master` is protected: work lands only via a reviewed pull
   request with a squash merge. Per `overlays/workflow-team.md`, never open a PR automatically —
   confirm with the maintainer first.
+- **Reviews follow `overlays/workflow-agent-review.md`.** A separate review agent reads each PR
+  fresh, with no implementer context, and leaves inline comments that cite the specific rule
+  module a finding violates rather than raising bare style preferences. It never pushes, merges,
+  or resolves its own comments. The implementer addresses feedback with follow-up commits on the
+  same branch; disagreements go to the maintainer to adjudicate, not back-and-forth between agents.
 - `Directory.Build.props` centralizes `TargetFramework`, `Nullable`, `ImplicitUsings`,
   `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, and `IsPackable` per `core/architecture.md`,
   so the `.csproj` files carry only what is specific to them (`OutputType`, package references).
