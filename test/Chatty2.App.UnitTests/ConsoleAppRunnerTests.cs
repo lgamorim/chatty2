@@ -37,6 +37,35 @@ public class ConsoleAppRunnerTests
     }
 
     [Fact]
+    public async Task Should_WritePrompt_BeforeReadingInput()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader("/exit\n"), output, new StringWriter());
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.StartsWith("C2> ", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_WritePrompt_OncePerLoopIteration()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new HelpCommand(), new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader("/help\n/exit\n"), output, new StringWriter());
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        var promptCount = output.ToString().Split("C2> ").Length - 1;
+        Assert.Equal(2, promptCount);
+    }
+
+    [Fact]
     public async Task Should_SkipBlankLines_WithoutDispatching()
     {
         var session = Substitute.For<IChatSession>();

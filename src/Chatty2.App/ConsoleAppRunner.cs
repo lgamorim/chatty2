@@ -4,6 +4,8 @@ namespace Chatty2.App;
 
 public sealed class ConsoleAppRunner
 {
+    private const string Prompt = "C2> ";
+
     private readonly Dictionary<string, ICommand> _commands;
     private readonly IChatSession _session;
     private readonly int _listeningPort;
@@ -66,6 +68,8 @@ public sealed class ConsoleAppRunner
 
         while (true)
         {
+            WritePrompt();
+
             var line = _input.ReadLine();
             if (line is null) return 0;
             if (string.IsNullOrWhiteSpace(line)) continue;
@@ -136,6 +140,14 @@ public sealed class ConsoleAppRunner
 
     private void OnListenFailed(object? sender, ListenFailedEventArgs e) =>
         WriteError($"Stopped listening for incoming connections: {e.Exception.Message}");
+
+    private void WritePrompt()
+    {
+        lock (_outputLock)
+        {
+            _output.Write(Prompt);
+        }
+    }
 
     private void WriteInfo(string message) => WriteLine(_output, message, ConsoleColor.Yellow, () => Console.IsOutputRedirected);
 

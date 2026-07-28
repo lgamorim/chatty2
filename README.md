@@ -46,6 +46,8 @@ dotnet run --project src/Chatty2.App -- --port 53001
 An invalid or missing port value (e.g. `--port abc`) prints a usage message and exits with code 1
 before any listening starts.
 
+The app shows a `C2>` prompt before reading each line of input.
+
 ### Commands
 
 | Command | Description |
