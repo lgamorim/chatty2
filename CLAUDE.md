@@ -60,7 +60,8 @@ over every PR — see `overlays/workflow-agent-review.md` for the contract betwe
 That combination matches no single profile in `profiles/`, so the modules are copied directly
 rather than through `tools/sync.ps1 -Profile` (which only resolves an exact profile match; it
 no longer accepts an ad-hoc `-Workflow` override). Re-audit for drift from the claude-rules
-checkout with a per-file hash comparison:
+checkout with a per-file content comparison, run from this repo's root (`$dstRoot` below is
+resolved relative to the current directory):
 
 ```powershell
 $dstRoot = (Resolve-Path .claude\rules).Path
@@ -71,9 +72,11 @@ Get-ChildItem -Recurse -File $dstRoot | ForEach-Object {
     if (-not (Test-Path $src)) { "ORPHAN $rel"; return }
     # Compare content, not bytes: the claude-rules worktree and this repo's committed blobs can
     # disagree on line endings (CRLF vs LF) for text that's otherwise identical, which would
-    # otherwise make Get-FileHash report false DRIFT.
-    $a = (Get-Content $_.FullName -Raw) -replace "`r`n", "`n"
-    $b = (Get-Content $src -Raw) -replace "`r`n", "`n"
+    # otherwise make Get-FileHash report false DRIFT. -Encoding utf8 is explicit because Windows
+    # PowerShell 5.1's default encoding detection misreads a non-BOM UTF-8 file as ANSI unless
+    # the file happens to carry a BOM.
+    $a = (Get-Content $_.FullName -Raw -Encoding utf8) -replace "`r`n", "`n"
+    $b = (Get-Content $src -Raw -Encoding utf8) -replace "`r`n", "`n"
     if ($a -ne $b) { "DRIFT  $rel" } else { "OK     $rel" }
 }
 ```
