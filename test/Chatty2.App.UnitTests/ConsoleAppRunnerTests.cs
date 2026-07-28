@@ -37,6 +37,132 @@ public class ConsoleAppRunnerTests
     }
 
     [Fact]
+    public async Task Should_WritePrompt_BeforeReadingInput()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader("/exit\n"), output, new StringWriter(),
+            isInputRedirected: () => false);
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.StartsWith("C2> ", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_WritePromptTwice_When_TwoLinesRead()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new HelpCommand(), new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader("/help\n/exit\n"), output, new StringWriter(),
+            isInputRedirected: () => false);
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        var promptCount = output.ToString().Split("C2> ").Length - 1;
+        Assert.Equal(2, promptCount);
+    }
+
+    [Fact]
+    public async Task Should_RedrawPromptOnFreshLine_When_MessageReceivedWhilePromptIsPending()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var input = new EventRaisingReader(new StringReader("/exit\n"), () =>
+            session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there")));
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, input, output, new StringWriter(),
+            isInputRedirected: () => false);
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal($"C2> {Environment.NewLine}[peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_NotRedrawPrompt_When_MessageReceivedAfterPromptAlreadyConsumed()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter(),
+            isInputRedirected: () => false);
+
+        session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal($"[peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_NotWritePrompt_When_InputIsRedirected()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader("/exit\n"), output, new StringWriter(),
+            isInputRedirected: () => true);
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal($"Goodbye!{Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_WriteTrailingNewline_When_InputReachesEndOfStreamWhilePromptPending()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader(string.Empty), output, new StringWriter(),
+            isInputRedirected: () => false);
+
+        var exitCode = await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal($"C2> {Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_NotWriteTrailingNewline_When_InputRedirectedReachesEndOfStream()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader(string.Empty), output, new StringWriter(),
+            isInputRedirected: () => true);
+
+        var exitCode = await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, output.ToString());
+    }
+
+    private sealed class EventRaisingReader(TextReader inner, Action onFirstReadLine) : TextReader
+    {
+        private bool _raised;
+
+        public override string? ReadLine()
+        {
+            if (!_raised)
+            {
+                _raised = true;
+                onFirstReadLine();
+            }
+
+            return inner.ReadLine();
+        }
+    }
+
+    [Fact]
     public async Task Should_SkipBlankLines_WithoutDispatching()
     {
         var session = Substitute.For<IChatSession>();

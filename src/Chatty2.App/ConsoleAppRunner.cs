@@ -4,14 +4,18 @@ namespace Chatty2.App;
 
 public sealed class ConsoleAppRunner
 {
+    private const string Prompt = "C2> ";
+
     private readonly Dictionary<string, ICommand> _commands;
     private readonly IChatSession _session;
     private readonly int _listeningPort;
     private readonly TextReader _input;
     private readonly TextWriter _output;
     private readonly TextWriter _error;
+    private readonly Func<bool> _isInputRedirected;
     private readonly Lock _outputLock = new();
     private CancellationToken _cancellationToken;
+    private bool _promptPending;
 
     public ConsoleAppRunner(
         IEnumerable<ICommand> commands,
@@ -19,7 +23,8 @@ public sealed class ConsoleAppRunner
         int listeningPort,
         TextReader input,
         TextWriter output,
-        TextWriter error)
+        TextWriter error,
+        Func<bool>? isInputRedirected = null)
     {
         _commands = commands.ToDictionary(command => command.Name, StringComparer.OrdinalIgnoreCase);
         _session = session;
@@ -27,6 +32,7 @@ public sealed class ConsoleAppRunner
         _input = input;
         _output = output;
         _error = error;
+        _isInputRedirected = isInputRedirected ?? (() => Console.IsInputRedirected);
 
         _session.MessageReceived += OnMessageReceived;
         _session.PeerConnected += OnPeerConnected;
@@ -66,7 +72,19 @@ public sealed class ConsoleAppRunner
 
         while (true)
         {
+            WritePrompt();
+
             var line = _input.ReadLine();
+            lock (_outputLock)
+            {
+                // Reaching end-of-stream right after a prompt was written leaves it sitting on
+                // a bare line with no trailing newline; finish that line before exiting so the
+                // shell's own prompt doesn't land glued to it. Only needed when a prompt was
+                // actually shown — WritePrompt is a no-op while input is redirected.
+                if (line is null && _promptPending) _output.WriteLine();
+                _promptPending = false;
+            }
+
             if (line is null) return 0;
             if (string.IsNullOrWhiteSpace(line)) continue;
 
@@ -137,6 +155,19 @@ public sealed class ConsoleAppRunner
     private void OnListenFailed(object? sender, ListenFailedEventArgs e) =>
         WriteError($"Stopped listening for incoming connections: {e.Exception.Message}");
 
+    private void WritePrompt()
+    {
+        // No one is watching a redirected/piped stdin for a prompt, and writing it there would
+        // just interleave noise into whatever's consuming the output.
+        if (_isInputRedirected()) return;
+
+        lock (_outputLock)
+        {
+            _output.Write(Prompt);
+            _promptPending = true;
+        }
+    }
+
     private void WriteInfo(string message) => WriteLine(_output, message, ConsoleColor.Yellow, () => Console.IsOutputRedirected);
 
     private void WriteError(string message) => WriteLine(_output, message, ConsoleColor.Red, () => Console.IsOutputRedirected);
@@ -145,6 +176,14 @@ public sealed class ConsoleAppRunner
     {
         lock (_outputLock)
         {
+            // A pending prompt (written but not yet followed by a completed ReadLine) sits on
+            // a bare line with no trailing newline. Writing straight over it would land this
+            // message on the same line as the prompt, so move to a fresh line first and redraw
+            // the prompt afterward — this doesn't restore any input the user had already typed,
+            // but it does leave them looking at a usable prompt again instead of a dead line.
+            var redrawPrompt = _promptPending && ReferenceEquals(writer, _output);
+            if (redrawPrompt) writer.WriteLine();
+
             if (!isRedirected()) Console.ForegroundColor = color;
 
             try
@@ -155,6 +194,8 @@ public sealed class ConsoleAppRunner
             {
                 if (!isRedirected()) Console.ForegroundColor = ConsoleColor.White;
             }
+
+            if (redrawPrompt) writer.Write(Prompt);
         }
     }
 }
