@@ -12,6 +12,7 @@ public sealed class ConsoleAppRunner
     private readonly TextReader _input;
     private readonly TextWriter _output;
     private readonly TextWriter _error;
+    private readonly Func<bool> _isInputRedirected;
     private readonly Lock _outputLock = new();
     private CancellationToken _cancellationToken;
     private bool _promptPending;
@@ -22,7 +23,8 @@ public sealed class ConsoleAppRunner
         int listeningPort,
         TextReader input,
         TextWriter output,
-        TextWriter error)
+        TextWriter error,
+        Func<bool>? isInputRedirected = null)
     {
         _commands = commands.ToDictionary(command => command.Name, StringComparer.OrdinalIgnoreCase);
         _session = session;
@@ -30,6 +32,7 @@ public sealed class ConsoleAppRunner
         _input = input;
         _output = output;
         _error = error;
+        _isInputRedirected = isInputRedirected ?? (() => Console.IsInputRedirected);
 
         _session.MessageReceived += OnMessageReceived;
         _session.PeerConnected += OnPeerConnected;
@@ -74,6 +77,11 @@ public sealed class ConsoleAppRunner
             var line = _input.ReadLine();
             lock (_outputLock)
             {
+                // Reaching end-of-stream right after a prompt was written leaves it sitting on
+                // a bare line with no trailing newline; finish that line before exiting so the
+                // shell's own prompt doesn't land glued to it. Only needed when a prompt was
+                // actually shown — WritePrompt is a no-op while input is redirected.
+                if (line is null && _promptPending) _output.WriteLine();
                 _promptPending = false;
             }
 
@@ -149,6 +157,10 @@ public sealed class ConsoleAppRunner
 
     private void WritePrompt()
     {
+        // No one is watching a redirected/piped stdin for a prompt, and writing it there would
+        // just interleave noise into whatever's consuming the output.
+        if (_isInputRedirected()) return;
+
         lock (_outputLock)
         {
             _output.Write(Prompt);

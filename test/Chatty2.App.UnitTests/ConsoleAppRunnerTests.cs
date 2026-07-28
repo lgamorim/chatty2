@@ -43,7 +43,8 @@ public class ConsoleAppRunnerTests
         var output = new StringWriter();
         var runner = new ConsoleAppRunner(
             [new ExitCommand()], session, ChatSession.DefaultPort,
-            new StringReader("/exit\n"), output, new StringWriter());
+            new StringReader("/exit\n"), output, new StringWriter(),
+            isInputRedirected: () => false);
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
@@ -57,7 +58,8 @@ public class ConsoleAppRunnerTests
         var output = new StringWriter();
         var runner = new ConsoleAppRunner(
             [new HelpCommand(), new ExitCommand()], session, ChatSession.DefaultPort,
-            new StringReader("/help\n/exit\n"), output, new StringWriter());
+            new StringReader("/help\n/exit\n"), output, new StringWriter(),
+            isInputRedirected: () => false);
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
@@ -73,7 +75,8 @@ public class ConsoleAppRunnerTests
         var input = new EventRaisingReader(new StringReader("/exit\n"), () =>
             session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there")));
         var runner = new ConsoleAppRunner(
-            [new ExitCommand()], session, ChatSession.DefaultPort, input, output, new StringWriter());
+            [new ExitCommand()], session, ChatSession.DefaultPort, input, output, new StringWriter(),
+            isInputRedirected: () => false);
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
@@ -86,13 +89,61 @@ public class ConsoleAppRunnerTests
         var session = Substitute.For<IChatSession>();
         var output = new StringWriter();
         var runner = new ConsoleAppRunner(
-            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter(),
+            isInputRedirected: () => false);
 
         session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal($"[peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_NotWritePrompt_When_InputIsRedirected()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader("/exit\n"), output, new StringWriter(),
+            isInputRedirected: () => true);
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal($"Goodbye!{Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_WriteTrailingNewline_When_InputReachesEndOfStreamWhilePromptPending()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader(string.Empty), output, new StringWriter(),
+            isInputRedirected: () => false);
+
+        var exitCode = await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal($"C2> {Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_NotWriteTrailingNewline_When_InputRedirectedReachesEndOfStream()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort,
+            new StringReader(string.Empty), output, new StringWriter(),
+            isInputRedirected: () => true);
+
+        var exitCode = await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, output.ToString());
     }
 
     private sealed class EventRaisingReader(TextReader inner, Action onFirstReadLine) : TextReader
