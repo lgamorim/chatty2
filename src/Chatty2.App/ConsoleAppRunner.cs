@@ -14,6 +14,7 @@ public sealed class ConsoleAppRunner
     private readonly TextWriter _error;
     private readonly Lock _outputLock = new();
     private CancellationToken _cancellationToken;
+    private bool _promptPending;
 
     public ConsoleAppRunner(
         IEnumerable<ICommand> commands,
@@ -71,6 +72,11 @@ public sealed class ConsoleAppRunner
             WritePrompt();
 
             var line = _input.ReadLine();
+            lock (_outputLock)
+            {
+                _promptPending = false;
+            }
+
             if (line is null) return 0;
             if (string.IsNullOrWhiteSpace(line)) continue;
 
@@ -146,6 +152,7 @@ public sealed class ConsoleAppRunner
         lock (_outputLock)
         {
             _output.Write(Prompt);
+            _promptPending = true;
         }
     }
 
@@ -157,6 +164,14 @@ public sealed class ConsoleAppRunner
     {
         lock (_outputLock)
         {
+            // A pending prompt (written but not yet followed by a completed ReadLine) sits on
+            // a bare line with no trailing newline. Writing straight over it would land this
+            // message on the same line as the prompt, so move to a fresh line first and redraw
+            // the prompt afterward — this doesn't restore any input the user had already typed,
+            // but it does leave them looking at a usable prompt again instead of a dead line.
+            var redrawPrompt = _promptPending && ReferenceEquals(writer, _output);
+            if (redrawPrompt) writer.WriteLine();
+
             if (!isRedirected()) Console.ForegroundColor = color;
 
             try
@@ -167,6 +182,8 @@ public sealed class ConsoleAppRunner
             {
                 if (!isRedirected()) Console.ForegroundColor = ConsoleColor.White;
             }
+
+            if (redrawPrompt) writer.Write(Prompt);
         }
     }
 }

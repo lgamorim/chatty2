@@ -66,6 +66,52 @@ public class ConsoleAppRunnerTests
     }
 
     [Fact]
+    public async Task Should_RedrawPromptOnFreshLine_When_MessageReceivedWhilePromptIsPending()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var input = new EventRaisingReader(new StringReader("/exit\n"), () =>
+            session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there")));
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, input, output, new StringWriter());
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal($"C2> {Environment.NewLine}[peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_NotRedrawPrompt_When_MessageReceivedAfterPromptAlreadyConsumed()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
+
+        session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal($"[peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
+    }
+
+    private sealed class EventRaisingReader(TextReader inner, Action onFirstReadLine) : TextReader
+    {
+        private bool _raised;
+
+        public override string? ReadLine()
+        {
+            if (!_raised)
+            {
+                _raised = true;
+                onFirstReadLine();
+            }
+
+            return inner.ReadLine();
+        }
+    }
+
+    [Fact]
     public async Task Should_SkipBlankLines_WithoutDispatching()
     {
         var session = Substitute.For<IChatSession>();
