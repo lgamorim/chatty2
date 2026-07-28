@@ -14,7 +14,7 @@ public class ChatSessionTests
         var connection = CreatePendingConnection("10.0.0.5:53000");
         listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(connection));
 
-        var session = new ChatSession(listener, Substitute.For<IPeerConnector>());
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "local");
         PeerConnectedEventArgs? raisedArgs = null;
         session.PeerConnected += (_, e) => raisedArgs = e;
 
@@ -32,7 +32,7 @@ public class ChatSessionTests
         var connection = CreatePendingConnection("192.168.1.10:53000");
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(connection));
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
         PeerConnectedEventArgs? raisedArgs = null;
         session.PeerConnected += (_, e) => raisedArgs = e;
 
@@ -44,6 +44,62 @@ public class ChatSessionTests
     }
 
     [Fact]
+    public async Task Should_SendHandshakeWithLocalUserName_When_ConnectAsync_Succeeds()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = CreatePendingConnection("192.168.1.10:53000");
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "Alice");
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+
+        await connection.Received(1).SendAsync(Arg.Is<string>(s => s.Contains("Alice")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Should_SendHandshakeWithLocalUserName_When_ListenAsync_AcceptsAConnection()
+    {
+        var listener = Substitute.For<IPeerListener>();
+        var connection = CreatePendingConnection("10.0.0.5:53000");
+        listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "Bob");
+
+        await session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None);
+
+        await connection.Received(1).SendAsync(Arg.Is<string>(s => s.Contains("Bob")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Should_RaisePeerIdentifiedAndNotForwardIt_When_FirstReceivedLineIsHandshake()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        // "NAME:" mirrors ChatSession's internal handshake-line convention.
+        connection.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<string?>("NAME:Bob"), Task.FromResult<string?>("hello"), Task.FromResult<string?>(null));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "Alice");
+        var received = new List<string>();
+        PeerIdentifiedEventArgs? identified = null;
+        var disconnectedTcs = new TaskCompletionSource();
+        session.MessageReceived += (_, e) => received.Add(e.Message);
+        session.PeerIdentified += (_, e) => identified = e;
+        session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(identified);
+        Assert.Equal("Bob", identified!.UserName);
+        Assert.Equal(["hello"], received);
+    }
+
+    [Fact]
     public async Task Should_ThrowInvalidOperationExceptionWithoutDialing_When_ConnectAsync_CalledWhileAlreadyConnected()
     {
         var connector = Substitute.For<IPeerConnector>();
@@ -52,7 +108,7 @@ public class ChatSessionTests
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(firstConnection));
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
         await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
@@ -81,7 +137,7 @@ public class ChatSessionTests
                 return dialCallCount == 1 ? firstConnectTcs.Task : secondConnectTcs.Task;
             });
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
 
         // Both calls pass the early "not connected yet" check and start dialing before
         // either has claimed the slot - the rare genuinely-concurrent /connect race the
@@ -110,7 +166,7 @@ public class ChatSessionTests
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(firstConnection));
 
-        var session = new ChatSession(listener, connector);
+        var session = new ChatSession(listener, connector, "local");
         await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
 
         var secondConnection = Substitute.For<IPeerConnection>();
@@ -142,7 +198,7 @@ public class ChatSessionTests
         listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(callInfo => Task.FromCanceled<IPeerConnection>(callInfo.ArgAt<CancellationToken>(1)));
 
-        var session = new ChatSession(listener, Substitute.For<IPeerConnector>());
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "local");
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -167,7 +223,7 @@ public class ChatSessionTests
                 return Task.FromCanceled<IPeerConnection>(callInfo.ArgAt<CancellationToken>(1));
             });
 
-        var session = new ChatSession(listener, Substitute.For<IPeerConnector>());
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "local");
 
         // Cancellation happens during each accept (not before calling ListenAsync) so
         // the loop actually reaches AcceptAsync every time, exercising the
@@ -201,7 +257,7 @@ public class ChatSessionTests
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(connectedConnection));
 
-        var session = new ChatSession(listener, connector);
+        var session = new ChatSession(listener, connector, "local");
         var listenTask = session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None);
 
         await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
@@ -223,7 +279,7 @@ public class ChatSessionTests
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(connection));
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
         var received = new List<string>();
         var disconnectedTcs = new TaskCompletionSource();
         session.MessageReceived += (_, e) => received.Add(e.Message);
@@ -245,7 +301,7 @@ public class ChatSessionTests
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(connection));
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
         var disconnectedTcs = new TaskCompletionSource();
         session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
 
@@ -265,7 +321,7 @@ public class ChatSessionTests
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(connection));
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
         var disconnectedTcs = new TaskCompletionSource();
         session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
 
@@ -283,7 +339,7 @@ public class ChatSessionTests
         listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException<IPeerConnection>(failure));
 
-        var session = new ChatSession(listener, Substitute.For<IPeerConnector>());
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "local");
         ListenFailedEventArgs? raisedArgs = null;
         session.ListenFailed += (_, e) => raisedArgs = e;
 
@@ -313,7 +369,7 @@ public class ChatSessionTests
                 return acceptCallCount == 1 ? firstAcceptTcs.Task : Task.FromResult(secondConnection);
             });
 
-        var session = new ChatSession(listener, Substitute.For<IPeerConnector>());
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "local");
 
         var firstListen = session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None);
         var secondListen = session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None);
@@ -334,7 +390,7 @@ public class ChatSessionTests
     [Fact]
     public async Task Should_ThrowInvalidOperationException_When_SendAsync_CalledWhileNotConnected()
     {
-        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>());
+        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), "local");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => session.SendAsync("hi", CancellationToken.None));
     }
@@ -344,11 +400,13 @@ public class ChatSessionTests
     {
         var connector = Substitute.For<IPeerConnector>();
         var connection = CreatePendingConnection("peer");
-        connection.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new IOException("broken")));
+        // Scoped to "hi" specifically so the handshake send ClaimAsync issues on connect
+        // (a SendAsync call of its own) isn't what throws.
+        connection.SendAsync(Arg.Is("hi"), Arg.Any<CancellationToken>()).Returns(Task.FromException(new IOException("broken")));
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(connection));
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
         await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
 
         await Assert.ThrowsAsync<IOException>(() => session.SendAsync("hi", CancellationToken.None));
@@ -357,7 +415,7 @@ public class ChatSessionTests
     [Fact]
     public void Should_ThrowInvalidOperationException_When_Disconnect_CalledWhileNotConnected()
     {
-        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>());
+        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), "local");
 
         Assert.Throws<InvalidOperationException>(() => session.Disconnect());
     }
@@ -374,7 +432,7 @@ public class ChatSessionTests
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(connection));
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
         var disconnectedTcs = new TaskCompletionSource();
         session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
 
@@ -393,7 +451,7 @@ public class ChatSessionTests
     [Fact]
     public void Should_NotThrow_When_Dispose_CalledMultipleTimes()
     {
-        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>());
+        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), "local");
 
         session.Dispose();
         session.Dispose();
@@ -407,7 +465,7 @@ public class ChatSessionTests
         connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(connection));
 
-        var session = new ChatSession(Substitute.For<IPeerListener>(), connector);
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
         await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
 
         session.Dispose();

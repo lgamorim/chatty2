@@ -49,6 +49,17 @@ before any listening starts.
 The app shows a `C2>` prompt before reading each line of input. The prompt is omitted when input
 is redirected (e.g. piped in from a script), since there's no one watching it.
 
+By default your display name is your OS login name. To use a different one, pass `--name` (or its
+shorthand `-n`):
+
+```
+dotnet run --project src/Chatty2.App -- --name Alice
+```
+
+Right after connecting, each side privately tells the other its display name, so incoming messages
+are labeled with the peer's actual name (e.g. `[Alice] hello`) instead of the generic `[peer]` used
+until it's known.
+
 ### Commands
 
 | Command | Description |

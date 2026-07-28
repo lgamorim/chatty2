@@ -263,6 +263,51 @@ public class ConsoleAppRunnerTests
     }
 
     [Fact]
+    public async Task Should_LabelIncomingMessageWithGenericPeer_When_NoPeerIdentifiedEventRaised()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
+
+        session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("[peer] hi there", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_LabelIncomingMessageWithPeerUserName_When_PeerIdentifiedEventRaised()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
+
+        session.PeerIdentified += Raise.EventWith(new PeerIdentifiedEventArgs("Bob"));
+        session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("[Bob] hi there", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_ResetPeerNameToGeneric_When_DisconnectedEventRaised()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
+
+        session.PeerIdentified += Raise.EventWith(new PeerIdentifiedEventArgs("Bob"));
+        session.Disconnected += Raise.Event<EventHandler>();
+        session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi again"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("[peer] hi again", output.ToString());
+    }
+
+    [Fact]
     public async Task Should_WriteErrorMessage_When_ListenFailedEventRaised()
     {
         var session = Substitute.For<IChatSession>();

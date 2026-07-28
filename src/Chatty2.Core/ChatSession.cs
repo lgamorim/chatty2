@@ -2,9 +2,10 @@ using System.Net;
 
 namespace Chatty2.Core;
 
-public sealed class ChatSession(IPeerListener listener, IPeerConnector connector) : IChatSession
+public sealed class ChatSession(IPeerListener listener, IPeerConnector connector, string localUserName) : IChatSession
 {
     public const int DefaultPort = 53000;
+    private const string HandshakePrefix = "NAME:";
 
     private readonly Lock _gate = new();
     private IPeerConnection? _activeConnection;
@@ -26,6 +27,8 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     public event EventHandler<ChatMessageReceivedEventArgs>? MessageReceived;
 
     public event EventHandler<PeerConnectedEventArgs>? PeerConnected;
+
+    public event EventHandler<PeerIdentifiedEventArgs>? PeerIdentified;
 
     public event EventHandler? Disconnected;
 
@@ -94,7 +97,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
             try
             {
-                Claim(candidate);
+                await ClaimAsync(candidate);
                 return;
             }
             catch (InvalidOperationException)
@@ -138,7 +141,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         cts?.Cancel();
 
         var candidate = await connector.ConnectAsync(ipAddress, port, cancellationToken);
-        Claim(candidate);
+        await ClaimAsync(candidate);
     }
 
     public Task SendAsync(string message, CancellationToken cancellationToken)
@@ -183,7 +186,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         cts?.Dispose();
     }
 
-    private void Claim(IPeerConnection candidate)
+    private async Task ClaimAsync(IPeerConnection candidate)
     {
         lock (_gate)
         {
@@ -196,14 +199,36 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             _activeConnection = candidate;
         }
 
+        // Sent before PeerConnected fires and before control returns to whichever caller
+        // triggered this (ConnectAsync, or the accept loop in ListenCoreAsync). Neither
+        // caller lets a user-typed message reach SendAsync before that point, so this line
+        // is always the first thing the peer sees on this connection.
+        await candidate.SendAsync(FormatHandshake(localUserName), CancellationToken.None);
+
         PeerConnected?.Invoke(this, new PeerConnectedEventArgs(candidate.RemoteEndPoint));
         _ = ReceiveLoopAsync(candidate);
+    }
+
+    private static string FormatHandshake(string userName) => HandshakePrefix + userName;
+
+    private static bool TryParseHandshake(string line, out string userName)
+    {
+        if (line.StartsWith(HandshakePrefix, StringComparison.Ordinal))
+        {
+            userName = line[HandshakePrefix.Length..];
+            return true;
+        }
+
+        userName = "";
+        return false;
     }
 
     private async Task ReceiveLoopAsync(IPeerConnection connection)
     {
         try
         {
+            var isFirstMessage = true;
+
             while (true)
             {
                 string? message;
@@ -217,6 +242,16 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                 }
 
                 if (message is null) break;
+
+                if (isFirstMessage)
+                {
+                    isFirstMessage = false;
+                    if (TryParseHandshake(message, out var peerUserName))
+                    {
+                        PeerIdentified?.Invoke(this, new PeerIdentifiedEventArgs(peerUserName));
+                        continue;
+                    }
+                }
 
                 MessageReceived?.Invoke(this, new ChatMessageReceivedEventArgs(message));
             }
