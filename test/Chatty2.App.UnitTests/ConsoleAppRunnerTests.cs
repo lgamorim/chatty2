@@ -52,7 +52,7 @@ public class ConsoleAppRunnerTests
     }
 
     [Fact]
-    public async Task Should_WritePrompt_OncePerLoopIteration()
+    public async Task Should_WritePromptTwice_When_TwoLinesRead()
     {
         var session = Substitute.For<IChatSession>();
         var output = new StringWriter();
