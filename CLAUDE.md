@@ -63,12 +63,18 @@ no longer accepts an ad-hoc `-Workflow` override). Re-audit for drift from the c
 checkout with a per-file hash comparison:
 
 ```powershell
-Get-ChildItem -Recurse -File .claude\rules | ForEach-Object {
-    $rel = $_.FullName.Substring((Resolve-Path .claude\rules).Path.Length)
-    $src = Join-Path <path-to>\claude-rules\.claude\rules $rel
-    if (-not (Test-Path $src)) { "ORPHAN $rel" }
-    elseif ((Get-FileHash $_.FullName).Hash -ne (Get-FileHash $src).Hash) { "DRIFT  $rel" }
-    else { "OK     $rel" }
+$dstRoot = (Resolve-Path .claude\rules).Path
+$srcRoot = '<path-to>\claude-rules\.claude\rules'
+Get-ChildItem -Recurse -File $dstRoot | ForEach-Object {
+    $rel = $_.FullName.Substring($dstRoot.Length).TrimStart('\')
+    $src = Join-Path $srcRoot $rel
+    if (-not (Test-Path $src)) { "ORPHAN $rel"; return }
+    # Compare content, not bytes: the claude-rules worktree and this repo's committed blobs can
+    # disagree on line endings (CRLF vs LF) for text that's otherwise identical, which would
+    # otherwise make Get-FileHash report false DRIFT.
+    $a = (Get-Content $_.FullName -Raw) -replace "`r`n", "`n"
+    $b = (Get-Content $src -Raw) -replace "`r`n", "`n"
+    if ($a -ne $b) { "DRIFT  $rel" } else { "OK     $rel" }
 }
 ```
 
@@ -86,6 +92,9 @@ Get-ChildItem -Recurse -File .claude\rules | ForEach-Object {
   module a finding violates rather than raising bare style preferences. It never pushes, merges,
   or resolves its own comments. The implementer addresses feedback with follow-up commits on the
   same branch; disagreements go to the maintainer to adjudicate, not back-and-forth between agents.
+  The overlay's own text says the implementer "opens the PR" — that's about role separation from
+  the reviewer, not a license to skip confirmation: the implementer still confirms with the
+  maintainer before opening any PR, per `overlays/workflow-team.md`, which takes precedence here.
 - `Directory.Build.props` centralizes `TargetFramework`, `Nullable`, `ImplicitUsings`,
   `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, and `IsPackable` per `core/architecture.md`,
   so the `.csproj` files carry only what is specific to them (`OutputType`, package references).
