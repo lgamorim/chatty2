@@ -53,33 +53,26 @@ Two instances on one machine: run each with a different `--port`, then `/connect
 @.claude/rules/overlays/workflow-agent-review.md
 @.claude/rules/archetype/application.md
 
-These are copied file-by-file from the shared [claude-rules](https://github.com/lgamorim/claude-rules)
-repository, composed as the `application` archetype under `team` workflow posture, plus
-`overlays/workflow-agent-review.md` (this repo runs a standing two-model implement/review flow
-over every PR — see `overlays/workflow-agent-review.md` for the contract between those two roles).
-That combination matches no single profile in `profiles/`, so the modules are copied directly
-rather than through `tools/sync.ps1 -Profile` (which only resolves an exact profile match; it
-no longer accepts an ad-hoc `-Workflow` override). Re-audit for drift from the claude-rules
-checkout with a per-file content comparison, run from this repo's root (`$dstRoot` below is
-resolved relative to the current directory):
+These are copied from the shared [claude-rules](https://github.com/lgamorim/claude-rules)
+repository via its `tools/sync.ps1`, composed as the `application` archetype under `team`
+workflow posture, plus `overlays/workflow-agent-review.md` (this repo runs a standing two-model
+implement/review flow over every PR — see that overlay for the contract between the two roles):
 
 ```powershell
-$dstRoot = (Resolve-Path .claude\rules).Path
-$srcRoot = '<path-to>\claude-rules\.claude\rules'
-Get-ChildItem -Recurse -File $dstRoot | ForEach-Object {
-    $rel = $_.FullName.Substring($dstRoot.Length).TrimStart('\')
-    $src = Join-Path $srcRoot $rel
-    if (-not (Test-Path $src)) { "ORPHAN $rel"; return }
-    # Compare content, not bytes: the claude-rules worktree and this repo's committed blobs can
-    # disagree on line endings (CRLF vs LF) for text that's otherwise identical, which would
-    # otherwise make Get-FileHash report false DRIFT. -Encoding utf8 is explicit because Windows
-    # PowerShell 5.1's default encoding detection misreads a non-BOM UTF-8 file as ANSI unless
-    # the file happens to carry a BOM.
-    $a = (Get-Content $_.FullName -Raw -Encoding utf8) -replace "`r`n", "`n"
-    $b = (Get-Content $src -Raw -Encoding utf8) -replace "`r`n", "`n"
-    if ($a -ne $b) { "DRIFT  $rel" } else { "OK     $rel" }
-}
+./tools/sync.ps1 -Target <path-to>\chatty2 -Profile application-solo -Workflow team -Add workflow-agent-review
 ```
+
+That combination matches no single profile in `profiles/`, so `sync.ps1` copies the modules
+without a profile manifest and prints the `@import` lines above to paste here. Re-audit for
+drift by re-running the **same flags** with `-Check` — it cannot infer how the set was
+composed, so omitting them compares against the wrong set:
+
+```powershell
+./tools/sync.ps1 -Target <path-to>\chatty2 -Profile application-solo -Workflow team -Add workflow-agent-review -Check
+```
+
+`-Check` compares normalized text rather than raw bytes, so a CRLF/LF difference between the
+claude-rules worktree and this repo's checkout is not reported as drift.
 
 ## Project-specific notes
 
