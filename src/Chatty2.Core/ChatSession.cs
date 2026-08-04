@@ -258,12 +258,23 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             // The peer's own ChatSession enforces this bound on its own local name, but a
             // non-conforming or hostile peer could still send something longer - cap what
             // reaches the terminal via ConsoleAppRunner's "[{name}] ..." label.
-            userName = parsed.Length > MaxUserNameLength ? parsed[..MaxUserNameLength] : parsed;
+            userName = parsed.Length > MaxUserNameLength ? TruncateWithoutSplittingASurrogatePair(parsed) : parsed;
             return true;
         }
 
         userName = "";
         return false;
+    }
+
+    private static string TruncateWithoutSplittingASurrogatePair(string value)
+    {
+        // A raw index cut at MaxUserNameLength can land between a non-BMP character's high
+        // and low surrogate, leaving an ill-formed string with a lone trailing surrogate.
+        // Back off one code unit in that case so the pair is dropped together instead.
+        var length = MaxUserNameLength;
+        if (char.IsHighSurrogate(value[length - 1])) length--;
+
+        return value[..length];
     }
 
     private async Task ReceiveLoopAsync(IPeerConnection connection)

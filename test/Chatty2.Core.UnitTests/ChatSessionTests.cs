@@ -178,6 +178,37 @@ public class ChatSessionTests
     }
 
     [Fact]
+    public async Task Should_NotSplitASurrogatePair_When_TruncatingAnOverlongPeerUserName()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        // 63 'a's (indices 0-62) plus a non-BMP character (a UTF-16 surrogate pair at
+        // indices 63-64) is 65 UTF-16 code units - one over the cap, with the cut landing
+        // exactly between the emoji's high and low surrogate.
+        var overlongName = new string('a', 63) + "\U0001F600";
+        connection.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<string?>("NAME:" + overlongName), Task.FromResult<string?>(null));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        PeerIdentifiedEventArgs? identified = null;
+        var disconnectedTcs = new TaskCompletionSource();
+        session.PeerIdentified += (_, e) => identified = e;
+        session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(identified);
+        // A naive cut at the 64-code-unit boundary would keep the emoji's high surrogate
+        // and drop its low surrogate, leaving an ill-formed string. Backing off to drop the
+        // whole surrogate pair instead keeps the result well-formed.
+        Assert.Equal(new string('a', 63), identified!.UserName);
+    }
+
+    [Fact]
     public async Task Should_ForwardAsMessageReceived_When_FirstReceivedLineIsNotAHandshake()
     {
         var connector = Substitute.For<IPeerConnector>();

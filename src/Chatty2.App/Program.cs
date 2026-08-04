@@ -23,19 +23,33 @@ for (var i = 0; i < args.Length; i += 2)
     }
 }
 
-using var session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), userName);
+ChatSession session;
+try
+{
+    session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), userName);
+}
+catch (ArgumentException)
+{
+    // Covers an empty Environment.UserName default (legitimate on some service accounts
+    // and container images) the same way every other bad input here is handled - a usage
+    // message instead of an unhandled exception escaping into Main.
+    return PrintUsageAndExit();
+}
 
-ICommand[] commands =
-[
-    new ConnectCommand(session, listeningPort),
-    new DisconnectCommand(session),
-    new HelpCommand(),
-    new ExitCommand()
-];
+using (session)
+{
+    ICommand[] commands =
+    [
+        new ConnectCommand(session, listeningPort),
+        new DisconnectCommand(session),
+        new HelpCommand(),
+        new ExitCommand()
+    ];
 
-var runner = new ConsoleAppRunner(commands, session, listeningPort, Console.In, Console.Out, Console.Error);
+    var runner = new ConsoleAppRunner(commands, session, listeningPort, Console.In, Console.Out, Console.Error);
 
-return await runner.RunAsync(CancellationToken.None);
+    return await runner.RunAsync(CancellationToken.None);
+}
 
 static int PrintUsageAndExit()
 {
