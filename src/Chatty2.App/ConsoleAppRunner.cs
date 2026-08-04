@@ -16,6 +16,7 @@ public sealed class ConsoleAppRunner
     private readonly Lock _outputLock = new();
     private CancellationToken _cancellationToken;
     private bool _promptPending;
+    private string _peerName = "peer";
 
     public ConsoleAppRunner(
         IEnumerable<ICommand> commands,
@@ -36,6 +37,7 @@ public sealed class ConsoleAppRunner
 
         _session.MessageReceived += OnMessageReceived;
         _session.PeerConnected += OnPeerConnected;
+        _session.PeerIdentified += OnPeerIdentified;
         _session.Disconnected += OnDisconnected;
         _session.ListenFailed += OnListenFailed;
     }
@@ -60,6 +62,7 @@ public sealed class ConsoleAppRunner
             // print a spurious notice (and trigger a pointless re-listen) after exit.
             _session.MessageReceived -= OnMessageReceived;
             _session.PeerConnected -= OnPeerConnected;
+            _session.PeerIdentified -= OnPeerIdentified;
             _session.Disconnected -= OnDisconnected;
             _session.ListenFailed -= OnListenFailed;
             _session.Dispose();
@@ -142,13 +145,39 @@ public sealed class ConsoleAppRunner
         }
     }
 
-    private void OnMessageReceived(object? sender, ChatMessageReceivedEventArgs e) => WriteInfo($"[peer] {e.Message}");
+    private void OnMessageReceived(object? sender, ChatMessageReceivedEventArgs e)
+    {
+        string peerName;
+        lock (_outputLock)
+        {
+            peerName = _peerName;
+        }
+
+        WriteInfo($"[{peerName}] {e.Message}");
+    }
 
     private void OnPeerConnected(object? sender, PeerConnectedEventArgs e) => WriteInfo($"Connected to {e.RemoteEndPoint}.");
+
+    private void OnPeerIdentified(object? sender, PeerIdentifiedEventArgs e)
+    {
+        // OnMessageReceived and OnDisconnected can run on a different receive-loop thread
+        // than this one raised it (a re-listen hands the next connection to a fresh task),
+        // so this needs the same lock discipline as the rest of this class's shared state
+        // rather than a second ad hoc synchronization scheme.
+        lock (_outputLock)
+        {
+            _peerName = e.UserName;
+        }
+    }
 
     private void OnDisconnected(object? sender, EventArgs e)
     {
         WriteInfo("Peer disconnected.");
+        lock (_outputLock)
+        {
+            _peerName = "peer";
+        }
+
         _ = _session.ListenAsync(_listeningPort, _cancellationToken);
     }
 

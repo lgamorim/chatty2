@@ -2,10 +2,13 @@ using System.Net;
 
 namespace Chatty2.Core;
 
-public sealed class ChatSession(IPeerListener listener, IPeerConnector connector) : IChatSession
+public sealed class ChatSession(IPeerListener listener, IPeerConnector connector, string localUserName) : IChatSession
 {
     public const int DefaultPort = 53000;
+    private const string HandshakePrefix = "NAME:";
+    private const int MaxUserNameLength = 64;
 
+    private readonly string _localUserName = ValidateLocalUserName(localUserName);
     private readonly Lock _gate = new();
     private IPeerConnection? _activeConnection;
     private CancellationTokenSource? _listenCts;
@@ -26,6 +29,8 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     public event EventHandler<ChatMessageReceivedEventArgs>? MessageReceived;
 
     public event EventHandler<PeerConnectedEventArgs>? PeerConnected;
+
+    public event EventHandler<PeerIdentifiedEventArgs>? PeerIdentified;
 
     public event EventHandler? Disconnected;
 
@@ -94,7 +99,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
             try
             {
-                Claim(candidate);
+                await ClaimAsync(candidate);
                 return;
             }
             catch (InvalidOperationException)
@@ -102,6 +107,13 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                 // Someone else claimed the active connection slot concurrently (the rare
                 // simultaneous-connect race). The candidate was already disposed by Claim;
                 // keep listening for a legitimate future peer.
+            }
+            catch (Exception)
+            {
+                // The handshake send failed right after accepting (peer connected and
+                // dropped immediately, RST, socket closed mid-handshake). ClaimAsync has
+                // already released the claimed slot and disposed the candidate; treat this
+                // as a single stillborn peer rather than a listener-level failure.
             }
         }
     }
@@ -138,7 +150,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         cts?.Cancel();
 
         var candidate = await connector.ConnectAsync(ipAddress, port, cancellationToken);
-        Claim(candidate);
+        await ClaimAsync(candidate);
     }
 
     public Task SendAsync(string message, CancellationToken cancellationToken)
@@ -183,7 +195,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         cts?.Dispose();
     }
 
-    private void Claim(IPeerConnection candidate)
+    private async Task ClaimAsync(IPeerConnection candidate)
     {
         lock (_gate)
         {
@@ -196,14 +208,81 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             _activeConnection = candidate;
         }
 
+        try
+        {
+            // Sent before PeerConnected fires and before control returns to whichever caller
+            // triggered this (ConnectAsync, or the accept loop in ListenCoreAsync). Neither
+            // caller lets a user-typed message reach SendAsync before that point, so this
+            // line is always the first thing the peer sees on this connection.
+            await candidate.SendAsync(FormatHandshake(_localUserName), CancellationToken.None);
+        }
+        catch
+        {
+            // The slot was already claimed above; a failed handshake must release it again,
+            // otherwise the session is stuck "connected" to a candidate that never finished
+            // connecting and every future ConnectAsync/SendAsync call fails until restart.
+            lock (_gate)
+            {
+                if (ReferenceEquals(_activeConnection, candidate)) _activeConnection = null;
+            }
+
+            candidate.Dispose();
+            throw;
+        }
+
         PeerConnected?.Invoke(this, new PeerConnectedEventArgs(candidate.RemoteEndPoint));
         _ = ReceiveLoopAsync(candidate);
+    }
+
+    private static string ValidateLocalUserName(string userName)
+    {
+        ArgumentNullException.ThrowIfNull(userName);
+
+        if (userName.Length is 0 or > MaxUserNameLength || userName.Contains('\r') || userName.Contains('\n'))
+        {
+            throw new ArgumentException(
+                $"User name must be 1-{MaxUserNameLength} characters and must not contain line breaks.",
+                nameof(userName));
+        }
+
+        return userName;
+    }
+
+    private static string FormatHandshake(string userName) => HandshakePrefix + userName;
+
+    private static bool TryParseHandshake(string line, out string userName)
+    {
+        if (line.StartsWith(HandshakePrefix, StringComparison.Ordinal))
+        {
+            var parsed = line[HandshakePrefix.Length..];
+            // The peer's own ChatSession enforces this bound on its own local name, but a
+            // non-conforming or hostile peer could still send something longer - cap what
+            // reaches the terminal via ConsoleAppRunner's "[{name}] ..." label.
+            userName = parsed.Length > MaxUserNameLength ? TruncateWithoutSplittingASurrogatePair(parsed) : parsed;
+            return true;
+        }
+
+        userName = "";
+        return false;
+    }
+
+    private static string TruncateWithoutSplittingASurrogatePair(string value)
+    {
+        // A raw index cut at MaxUserNameLength can land between a non-BMP character's high
+        // and low surrogate, leaving an ill-formed string with a lone trailing surrogate.
+        // Back off one code unit in that case so the pair is dropped together instead.
+        var length = MaxUserNameLength;
+        if (char.IsHighSurrogate(value[length - 1])) length--;
+
+        return value[..length];
     }
 
     private async Task ReceiveLoopAsync(IPeerConnection connection)
     {
         try
         {
+            var isFirstMessage = true;
+
             while (true)
             {
                 string? message;
@@ -217,6 +296,16 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                 }
 
                 if (message is null) break;
+
+                if (isFirstMessage)
+                {
+                    isFirstMessage = false;
+                    if (TryParseHandshake(message, out var peerUserName))
+                    {
+                        PeerIdentified?.Invoke(this, new PeerIdentifiedEventArgs(peerUserName));
+                        continue;
+                    }
+                }
 
                 MessageReceived?.Invoke(this, new ChatMessageReceivedEventArgs(message));
             }

@@ -10,6 +10,8 @@ public interface IChatSession : IDisposable
 
     event EventHandler<PeerConnectedEventArgs>? PeerConnected;
 
+    event EventHandler<PeerIdentifiedEventArgs>? PeerIdentified;
+
     event EventHandler? Disconnected;
 
     event EventHandler<ListenFailedEventArgs>? ListenFailed;

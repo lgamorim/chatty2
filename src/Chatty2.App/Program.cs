@@ -2,28 +2,59 @@ using Chatty2.App;
 using Chatty2.Core;
 
 var listeningPort = ChatSession.DefaultPort;
-if (args.Length > 0)
+var userName = Environment.UserName;
+
+for (var i = 0; i < args.Length; i += 2)
 {
-    if (args.Length != 2
-        || args[0] is not ("--port" or "-p")
-        || !int.TryParse(args[1], out listeningPort)
-        || listeningPort is < 1 or > 65535)
+    if (i + 1 >= args.Length) return PrintUsageAndExit();
+
+    switch (args[i])
     {
-        Console.Error.WriteLine("Usage: Chatty2.App [--port <port>]");
-        return 1;
+        case "--port" or "-p":
+            if (!int.TryParse(args[i + 1], out listeningPort) || listeningPort is < 1 or > 65535)
+                return PrintUsageAndExit();
+            break;
+        case "--name" or "-n":
+            if (string.IsNullOrWhiteSpace(args[i + 1])) return PrintUsageAndExit();
+            userName = args[i + 1];
+            break;
+        default:
+            return PrintUsageAndExit();
     }
 }
 
-using var session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector());
+ChatSession session;
+try
+{
+    session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), userName);
+}
+catch (ArgumentException exception)
+{
+    // Covers an empty Environment.UserName default (legitimate on some service accounts
+    // and container images) the same way every other bad input here is handled - a usage
+    // message instead of an unhandled exception escaping into Main. The validation message
+    // itself says which constraint was violated, which the generic usage line does not.
+    Console.Error.WriteLine(exception.Message);
+    return PrintUsageAndExit();
+}
 
-ICommand[] commands =
-[
-    new ConnectCommand(session, listeningPort),
-    new DisconnectCommand(session),
-    new HelpCommand(),
-    new ExitCommand()
-];
+using (session)
+{
+    ICommand[] commands =
+    [
+        new ConnectCommand(session, listeningPort),
+        new DisconnectCommand(session),
+        new HelpCommand(),
+        new ExitCommand()
+    ];
 
-var runner = new ConsoleAppRunner(commands, session, listeningPort, Console.In, Console.Out, Console.Error);
+    var runner = new ConsoleAppRunner(commands, session, listeningPort, Console.In, Console.Out, Console.Error);
 
-return await runner.RunAsync(CancellationToken.None);
+    return await runner.RunAsync(CancellationToken.None);
+}
+
+static int PrintUsageAndExit()
+{
+    Console.Error.WriteLine("Usage: Chatty2.App [--port <port>] [--name <name>]");
+    return 1;
+}

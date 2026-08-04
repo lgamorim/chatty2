@@ -11,7 +11,7 @@ public class ChatSessionIntegrationTests
     {
         var port = GetFreeLoopbackPort();
         var unreachablePort = GetFreeLoopbackPort();
-        using var session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector());
+        using var session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "local");
 
         _ = session.ListenAsync(port, CancellationToken.None);
 

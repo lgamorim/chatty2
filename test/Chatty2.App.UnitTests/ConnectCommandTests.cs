@@ -103,4 +103,25 @@ public class ConnectCommandTests
         Assert.Contains("Could not connect", result.Message);
         await session.Received(1).ListenAsync(ChatSession.DefaultPort, cts.Token);
     }
+
+    [Fact]
+    public async Task Should_ReturnFriendlyErrorAndRestartListening_When_HandshakeSendFails()
+    {
+        // ChatSession.ConnectAsync wraps a failed handshake send as IOException (the dial
+        // step itself only ever throws SocketException) - this must be handled the same way
+        // as a failed dial, not left to escape into ConsoleAppRunner's outer catch and kill
+        // the app over what a real user would see as just a failed /connect attempt.
+        var session = Substitute.For<IChatSession>();
+        session.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new IOException("broken")));
+        var command = new ConnectCommand(session, ChatSession.DefaultPort);
+        using var cts = new CancellationTokenSource();
+
+        var result = await command.ExecuteAsync(["192.168.1.5", "53001"], cts.Token);
+
+        Assert.False(result.ShouldExit);
+        Assert.True(result.IsError);
+        Assert.Contains("Could not connect", result.Message);
+        await session.Received(1).ListenAsync(ChatSession.DefaultPort, cts.Token);
+    }
 }
