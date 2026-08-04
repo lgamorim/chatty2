@@ -72,6 +72,135 @@ public class ChatSessionTests
     }
 
     [Fact]
+    public async Task Should_ReleaseConnectionAndPropagate_When_HandshakeSendFailsAfterConnectAsync()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new IOException("broken")));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+
+        await Assert.ThrowsAsync<IOException>(
+            () => session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None));
+
+        // The failed handshake must not leave the slot permanently claimed - otherwise every
+        // future ConnectAsync/SendAsync call would keep failing until the app restarts.
+        Assert.False(session.IsConnected);
+        connection.Received(1).Dispose();
+    }
+
+    [Fact]
+    public async Task Should_KeepListening_When_HandshakeSendFailsRightAfterAcceptingAConnection()
+    {
+        var listener = Substitute.For<IPeerListener>();
+        var failingConnection = Substitute.For<IPeerConnection>();
+        failingConnection.RemoteEndPoint.Returns("bad-peer");
+        failingConnection.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new IOException("broken")));
+        var goodConnection = CreatePendingConnection("good-peer");
+
+        var acceptCallCount = 0;
+        listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                acceptCallCount++;
+                return Task.FromResult(acceptCallCount == 1 ? failingConnection : goodConnection);
+            });
+
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "local");
+        var listenFailedRaised = false;
+        session.ListenFailed += (_, _) => listenFailedRaised = true;
+
+        // A failed handshake right after accepting must be treated as a single stillborn
+        // peer, not a listener-level failure - otherwise every real caller (which invokes
+        // ListenAsync fire-and-forget) would see listening die silently on the first peer
+        // that connects and drops before finishing the handshake.
+        await session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, acceptCallCount);
+        Assert.True(session.IsConnected);
+        Assert.False(listenFailedRaised);
+        failingConnection.Received(1).Dispose();
+    }
+
+    [Fact]
+    public void Should_ThrowArgumentNullException_When_LocalUserNameIsNull() =>
+        Assert.Throws<ArgumentNullException>(
+            () => new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), null!));
+
+    [Fact]
+    public void Should_ThrowArgumentException_When_LocalUserNameIsEmpty() =>
+        Assert.Throws<ArgumentException>(
+            () => new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), ""));
+
+    [Fact]
+    public void Should_ThrowArgumentException_When_LocalUserNameContainsNewline() =>
+        Assert.Throws<ArgumentException>(
+            () => new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), "Alice\nfake message"));
+
+    [Fact]
+    public void Should_ThrowArgumentException_When_LocalUserNameContainsCarriageReturn() =>
+        Assert.Throws<ArgumentException>(
+            () => new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), "Alice\rfake message"));
+
+    [Fact]
+    public void Should_ThrowArgumentException_When_LocalUserNameExceedsMaxLength() =>
+        Assert.Throws<ArgumentException>(
+            () => new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), new string('a', 65)));
+
+    [Fact]
+    public async Task Should_TruncateOverlongPeerUserName_When_HandshakeExceedsMaxLength()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<string?>("NAME:" + new string('a', 100)), Task.FromResult<string?>(null));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        PeerIdentifiedEventArgs? identified = null;
+        var disconnectedTcs = new TaskCompletionSource();
+        session.PeerIdentified += (_, e) => identified = e;
+        session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(identified);
+        Assert.Equal(64, identified!.UserName.Length);
+    }
+
+    [Fact]
+    public async Task Should_ForwardAsMessageReceived_When_FirstReceivedLineIsNotAHandshake()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<string?>("not a handshake line"), Task.FromResult<string?>(null));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var received = new List<string>();
+        var disconnectedTcs = new TaskCompletionSource();
+        session.MessageReceived += (_, e) => received.Add(e.Message);
+        session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(["not a handshake line"], received);
+    }
+
+    [Fact]
     public async Task Should_RaisePeerIdentifiedAndNotForwardIt_When_FirstReceivedLineIsHandshake()
     {
         var connector = Substitute.For<IPeerConnector>();

@@ -6,7 +6,9 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 {
     public const int DefaultPort = 53000;
     private const string HandshakePrefix = "NAME:";
+    private const int MaxUserNameLength = 64;
 
+    private readonly string _localUserName = ValidateLocalUserName(localUserName);
     private readonly Lock _gate = new();
     private IPeerConnection? _activeConnection;
     private CancellationTokenSource? _listenCts;
@@ -106,6 +108,13 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                 // simultaneous-connect race). The candidate was already disposed by Claim;
                 // keep listening for a legitimate future peer.
             }
+            catch (Exception)
+            {
+                // The handshake send failed right after accepting (peer connected and
+                // dropped immediately, RST, socket closed mid-handshake). ClaimAsync has
+                // already released the claimed slot and disposed the candidate; treat this
+                // as a single stillborn peer rather than a listener-level failure.
+            }
         }
     }
 
@@ -199,14 +208,44 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             _activeConnection = candidate;
         }
 
-        // Sent before PeerConnected fires and before control returns to whichever caller
-        // triggered this (ConnectAsync, or the accept loop in ListenCoreAsync). Neither
-        // caller lets a user-typed message reach SendAsync before that point, so this line
-        // is always the first thing the peer sees on this connection.
-        await candidate.SendAsync(FormatHandshake(localUserName), CancellationToken.None);
+        try
+        {
+            // Sent before PeerConnected fires and before control returns to whichever caller
+            // triggered this (ConnectAsync, or the accept loop in ListenCoreAsync). Neither
+            // caller lets a user-typed message reach SendAsync before that point, so this
+            // line is always the first thing the peer sees on this connection.
+            await candidate.SendAsync(FormatHandshake(_localUserName), CancellationToken.None);
+        }
+        catch
+        {
+            // The slot was already claimed above; a failed handshake must release it again,
+            // otherwise the session is stuck "connected" to a candidate that never finished
+            // connecting and every future ConnectAsync/SendAsync call fails until restart.
+            lock (_gate)
+            {
+                if (ReferenceEquals(_activeConnection, candidate)) _activeConnection = null;
+            }
+
+            candidate.Dispose();
+            throw;
+        }
 
         PeerConnected?.Invoke(this, new PeerConnectedEventArgs(candidate.RemoteEndPoint));
         _ = ReceiveLoopAsync(candidate);
+    }
+
+    private static string ValidateLocalUserName(string userName)
+    {
+        ArgumentNullException.ThrowIfNull(userName);
+
+        if (userName.Length is 0 or > MaxUserNameLength || userName.Contains('\r') || userName.Contains('\n'))
+        {
+            throw new ArgumentException(
+                $"User name must be 1-{MaxUserNameLength} characters and must not contain line breaks.",
+                nameof(userName));
+        }
+
+        return userName;
     }
 
     private static string FormatHandshake(string userName) => HandshakePrefix + userName;
@@ -215,7 +254,11 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     {
         if (line.StartsWith(HandshakePrefix, StringComparison.Ordinal))
         {
-            userName = line[HandshakePrefix.Length..];
+            var parsed = line[HandshakePrefix.Length..];
+            // The peer's own ChatSession enforces this bound on its own local name, but a
+            // non-conforming or hostile peer could still send something longer - cap what
+            // reaches the terminal via ConsoleAppRunner's "[{name}] ..." label.
+            userName = parsed.Length > MaxUserNameLength ? parsed[..MaxUserNameLength] : parsed;
             return true;
         }
 
