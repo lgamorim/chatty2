@@ -8,6 +8,8 @@ namespace Chatty2.App.UnitTests;
 
 public class ConsoleAppRunnerTests
 {
+    private static readonly DateTimeOffset FixedInstant = new(2026, 8, 4, 14, 30, 5, TimeSpan.Zero);
+
     [Fact]
     public async Task Should_ReturnZero_When_InputReachesEndOfStreamWithoutExitCommand()
     {
@@ -76,11 +78,11 @@ public class ConsoleAppRunnerTests
             session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there")));
         var runner = new ConsoleAppRunner(
             [new ExitCommand()], session, ChatSession.DefaultPort, input, output, new StringWriter(),
-            isInputRedirected: () => false);
+            isInputRedirected: () => false, timeProvider: new FixedTimeProvider(FixedInstant));
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal($"C2> {Environment.NewLine}[peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
+        Assert.Equal($"C2> {Environment.NewLine}[14:30:05] [peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
     }
 
     [Fact]
@@ -90,13 +92,45 @@ public class ConsoleAppRunnerTests
         var output = new StringWriter();
         var runner = new ConsoleAppRunner(
             [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter(),
-            isInputRedirected: () => false);
+            isInputRedirected: () => false, timeProvider: new FixedTimeProvider(FixedInstant));
 
         session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal($"[peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
+        Assert.Equal($"[14:30:05] [peer] hi there{Environment.NewLine}C2> Goodbye!{Environment.NewLine}", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_PrefixIncomingMessageWithLocalTimestamp_When_MessageReceived()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter(),
+            timeProvider: new FixedTimeProvider(FixedInstant));
+
+        session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("[14:30:05] [peer] hi there", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_NotTimestampNonMessageNotifications_When_PeerConnectedEventRaised()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter(),
+            timeProvider: new FixedTimeProvider(FixedInstant));
+
+        session.PeerConnected += Raise.EventWith(new PeerConnectedEventArgs("10.0.0.2:53000"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("14:30:05", output.ToString());
     }
 
     [Fact]
@@ -437,5 +471,14 @@ public class ConsoleAppRunnerTests
         public override Encoding Encoding => Encoding.UTF8;
 
         public override void WriteLine(string? value) => throw new IOException("broken pipe");
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        // Pinning LocalTimeZone to UTC alongside the fixed instant keeps GetLocalNow()
+        // deterministic regardless of the machine running the tests.
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }
