@@ -59,7 +59,9 @@ dotnet run --project src/Chatty2.App -- --name Alice
 Right after connecting, each side privately tells the other its display name, so incoming messages
 are labeled with the peer's actual name (e.g. `[Alice] hello`) instead of the generic `[peer]` used
 until it's known. This means the first line on the wire after connecting is reserved for that
-exchange, so a display name is limited to 1-64 characters and cannot contain a line break.
+exchange, so a display name is limited to 1-64 characters (counted the simple way - a name using
+emoji or other characters outside the common range may hit the limit sooner) and cannot contain a
+line break.
 
 ### Commands
 

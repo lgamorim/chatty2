@@ -28,11 +28,13 @@ try
 {
     session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), userName);
 }
-catch (ArgumentException)
+catch (ArgumentException exception)
 {
     // Covers an empty Environment.UserName default (legitimate on some service accounts
     // and container images) the same way every other bad input here is handled - a usage
-    // message instead of an unhandled exception escaping into Main.
+    // message instead of an unhandled exception escaping into Main. The validation message
+    // itself says which constraint was violated, which the generic usage line does not.
+    Console.Error.WriteLine(exception.Message);
     return PrintUsageAndExit();
 }
 
