@@ -1,3 +1,4 @@
+using System.Globalization;
 using Chatty2.Core;
 
 namespace Chatty2.App;
@@ -13,6 +14,7 @@ public sealed class ConsoleAppRunner
     private readonly TextWriter _output;
     private readonly TextWriter _error;
     private readonly Func<bool> _isInputRedirected;
+    private readonly TimeProvider _timeProvider;
     private readonly Lock _outputLock = new();
     private CancellationToken _cancellationToken;
     private bool _promptPending;
@@ -25,7 +27,8 @@ public sealed class ConsoleAppRunner
         TextReader input,
         TextWriter output,
         TextWriter error,
-        Func<bool>? isInputRedirected = null)
+        Func<bool>? isInputRedirected = null,
+        TimeProvider? timeProvider = null)
     {
         _commands = commands.ToDictionary(command => command.Name, StringComparer.OrdinalIgnoreCase);
         _session = session;
@@ -34,6 +37,7 @@ public sealed class ConsoleAppRunner
         _output = output;
         _error = error;
         _isInputRedirected = isInputRedirected ?? (() => Console.IsInputRedirected);
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         _session.MessageReceived += OnMessageReceived;
         _session.PeerConnected += OnPeerConnected;
@@ -153,7 +157,8 @@ public sealed class ConsoleAppRunner
             peerName = _peerName;
         }
 
-        WriteInfo($"[{peerName}] {e.Message}");
+        var timestamp = _timeProvider.GetLocalNow().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        WriteInfo($"[{timestamp}] [{peerName}] {e.Message}");
     }
 
     private void OnPeerConnected(object? sender, PeerConnectedEventArgs e) => WriteInfo($"Connected to {e.RemoteEndPoint}.");

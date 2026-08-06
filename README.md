@@ -63,6 +63,9 @@ exchange, so a display name is limited to 1-64 characters (counted the simple wa
 emoji or other characters outside the common range may hit the limit sooner) and cannot contain a
 line break.
 
+Each incoming message is also prefixed with the local time it arrived,
+e.g. `[14:30:05] [Alice] hello`.
+
 ### Commands
 
 | Command | Description |
