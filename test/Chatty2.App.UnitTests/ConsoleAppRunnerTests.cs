@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
 using Chatty2.Core;
@@ -130,7 +131,37 @@ public class ConsoleAppRunnerTests
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
+        Assert.Contains("Connected to 10.0.0.2:53000.", output.ToString());
         Assert.DoesNotContain("14:30:05", output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_FormatTimestampInvariantly_When_CurrentCultureUsesADifferentTimeSeparator()
+    {
+        // HH:mm:ss is not a literal colon - ':' is the time separator specifier, resolved
+        // against CultureInfo.CurrentCulture (e.g. fi-FI renders it as '.'). The README
+        // promises the literal "[14:30:05]" format, so this must not depend on the OS
+        // culture of whatever machine runs the app or this test.
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fi-FI");
+            var session = Substitute.For<IChatSession>();
+            var output = new StringWriter();
+            var runner = new ConsoleAppRunner(
+                [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter(),
+                timeProvider: new FixedTimeProvider(FixedInstant));
+
+            session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
+
+            await runner.RunAsync(TestContext.Current.CancellationToken);
+
+            Assert.Contains("[14:30:05] [peer] hi there", output.ToString());
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
     }
 
     [Fact]

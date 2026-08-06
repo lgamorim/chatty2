@@ -1,3 +1,4 @@
+using System.Globalization;
 using Chatty2.Core;
 
 namespace Chatty2.App;
@@ -156,7 +157,8 @@ public sealed class ConsoleAppRunner
             peerName = _peerName;
         }
 
-        WriteInfo($"[{_timeProvider.GetLocalNow():HH:mm:ss}] [{peerName}] {e.Message}");
+        var timestamp = _timeProvider.GetLocalNow().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        WriteInfo($"[{timestamp}] [{peerName}] {e.Message}");
     }
 
     private void OnPeerConnected(object? sender, PeerConnectedEventArgs e) => WriteInfo($"Connected to {e.RemoteEndPoint}.");
