@@ -1,5 +1,8 @@
 # Chatty2
 
+[![CI](https://github.com/lgamorim/chatty2/actions/workflows/ci.yml/badge.svg)](https://github.com/lgamorim/chatty2/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 _A console app for messaging another computer on the same local network (alpha)._
 
 Chatty2 is a peer-to-peer LAN chat tool. Anything you type without a leading `/` is sent as a
