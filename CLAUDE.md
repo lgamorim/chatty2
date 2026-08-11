@@ -50,16 +50,16 @@ Two instances on one machine: run each with a different `--port`, then `/connect
 @.claude/rules/core/testing-philosophy.md
 @.claude/rules/core/workflow-core.md
 @.claude/rules/overlays/workflow-team.md
-@.claude/rules/overlays/workflow-agent-review.md
+@.claude/rules/overlays/workflow-agent-review-team.md
 @.claude/rules/archetype/application.md
 
 These are copied from the shared [claude-rules](https://github.com/lgamorim/claude-rules)
 repository via its `tools/sync.ps1`, composed as the `application` archetype under `team`
-workflow posture, plus `overlays/workflow-agent-review.md` (this repo runs a standing two-model
+workflow posture, plus `overlays/workflow-agent-review-team.md` (this repo runs a standing two-model
 implement/review flow over every PR — see that overlay for the contract between the two roles):
 
 ```powershell
-./tools/sync.ps1 -Target <path-to>\chatty2 -Profile application-solo -Workflow team -Add workflow-agent-review
+./tools/sync.ps1 -Target <path-to>\chatty2 -Profile application-solo -Workflow team -Add workflow-agent-review-team
 ```
 
 That combination matches no single profile in `profiles/`, so `sync.ps1` copies the modules
@@ -68,7 +68,7 @@ drift by re-running the **same flags** with `-Check` — it cannot infer how the
 composed, so omitting them compares against the wrong set:
 
 ```powershell
-./tools/sync.ps1 -Target <path-to>\chatty2 -Profile application-solo -Workflow team -Add workflow-agent-review -Check
+./tools/sync.ps1 -Target <path-to>\chatty2 -Profile application-solo -Workflow team -Add workflow-agent-review-team -Check
 ```
 
 `-Check` compares normalized text rather than raw bytes, so a CRLF/LF difference between the
