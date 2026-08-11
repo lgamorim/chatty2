@@ -1,14 +1,16 @@
-# Workflow — Agent-assisted review (implement → review)
+# Workflow — Agent-assisted review (team, PR-based)
 
 Add when a repo runs a standing two-role flow: one agent implements a change and
 opens the pull request, a separate agent reviews that PR. Compose with
 `workflow-team.md` — the flow presupposes a PR, so it does not combine with
-`workflow-solo.md`.
+`workflow-solo.md` (a solo repo without PRs uses
+`workflow-agent-review-solo.md` instead).
 
 This overlay defines the *contract* between the two roles. It deliberately says
 nothing about which models run or how they are triggered (in-session subagents, a
 CI action, an SDK harness) — that wiring is repo automation, configured outside
-the rule set, not policy that belongs here.
+the rule set, not policy that belongs here. A starting skeleton for the reviewer
+agent lives in `templates/reviewer-subagent.md`.
 
 Roles — never the same context:
 - **Implementer** — delivers the change on a `feature/` branch and opens the PR.
