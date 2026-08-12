@@ -83,7 +83,7 @@ claude-rules worktree and this repo's checkout is not reported as drift.
 - **Workflow posture is `team`.** `master` is protected: work lands only via a reviewed pull
   request with a squash merge. Per `overlays/workflow-team.md`, never open a PR automatically —
   confirm with the maintainer first.
-- **Reviews follow `overlays/workflow-agent-review.md`.** A separate review agent reads each PR
+- **Reviews follow `overlays/workflow-agent-review-team.md`.** A separate review agent reads each PR
   fresh, with no implementer context, and leaves inline comments that cite the specific rule
   module a finding violates rather than raising bare style preferences. It never pushes, merges,
   or resolves its own comments. The implementer addresses feedback with follow-up commits on the
