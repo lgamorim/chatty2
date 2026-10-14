@@ -20,6 +20,13 @@
     <IsPackable>false</IsPackable>
 
     <!--
+      The single source of truth for the app's version. It names the last
+      released version and is bumped in the PR that cuts a release, together
+      with CHANGELOG.md.
+    -->
+    <Version>0.1.0</Version>
+
+    <!--
       IDE0005 (remove unnecessary usings) only runs at build time when a
       documentation file is generated. Generating one also turns on CS1591
       (missing XML comment), which archetype/application.md explicitly relaxes
