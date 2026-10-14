@@ -84,13 +84,19 @@ claude-rules worktree and this repo's checkout is not reported as drift.
   request with a squash merge. Per `overlays/workflow-team.md`, never open a PR automatically —
   confirm with the maintainer first.
 - **Reviews follow `overlays/workflow-agent-review-team.md`.** A separate review agent reads each PR
-  fresh, with no implementer context, and leaves inline comments that cite the specific rule
-  module a finding violates rather than raising bare style preferences. It never pushes, merges,
+  fresh, with no implementer context, and reports findings that cite the specific rule
+  module each one violates rather than raising bare style preferences; they reach the PR as
+  inline comments (see the wiring below). It never pushes, merges,
   or resolves its own comments. The implementer addresses feedback with follow-up commits on the
   same branch; disagreements go to the maintainer to adjudicate, not back-and-forth between agents.
   The overlay's own text says the implementer "opens the PR" — that's about role separation from
   the reviewer, not a license to skip confirmation: the implementer still confirms with the
   maintainer before opening any PR, per `overlays/workflow-team.md`, which takes precedence here.
+  The reviewer role is wired as the `code-reviewer` subagent (`.claude/agents/code-reviewer.md`,
+  from the claude-rules `templates/reviewer-subagent.md`): it has no Edit/Write tools and posts
+  nothing itself, so it returns its findings as a report. The implementer passes it only the PR
+  description (intent, tests added, deliberate deviations) and relays the report verbatim as inline
+  PR comments, leaving them unresolved for the maintainer to adjudicate.
 - `Directory.Build.props` centralizes `TargetFramework`, `Nullable`, `ImplicitUsings`,
   `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, and `IsPackable` per `core/architecture.md`,
   so the `.csproj` files carry only what is specific to them (`OutputType`, package references).
