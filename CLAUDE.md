@@ -104,3 +104,7 @@ claude-rules worktree and this repo's checkout is not reported as drift.
   no real I/O, network, clock, or `Task.Delay`, per `core/testing-philosophy.md`.
 - `ChatSession` guards its state with a `Lock` (`_gate`) because listen and dial race by design;
   keep new state transitions inside that lock rather than adding a second synchronization scheme.
+- **Versioning.** `<Version>` in `Directory.Build.props` names the last *released* version and
+  changes only in the PR that cuts a release, together with `CHANGELOG.md` and a matching `vX.Y.Z`
+  tag. A PR with a user-visible change (a command, flag, output, or wire-protocol change) adds a
+  line under `## [Unreleased]` in `CHANGELOG.md`; refactors, tests and rule resyncs do not.
