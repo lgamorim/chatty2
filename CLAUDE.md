@@ -91,6 +91,11 @@ claude-rules worktree and this repo's checkout is not reported as drift.
   The overlay's own text says the implementer "opens the PR" — that's about role separation from
   the reviewer, not a license to skip confirmation: the implementer still confirms with the
   maintainer before opening any PR, per `overlays/workflow-team.md`, which takes precedence here.
+  The reviewer role is wired as the `code-reviewer` subagent (`.claude/agents/code-reviewer.md`,
+  from the claude-rules `templates/reviewer-subagent.md`): it has no Edit/Write tools and returns a
+  findings report rather than posting comments itself, so the implementer passes it only the PR
+  description (intent, tests added, deliberate deviations) and relays the report verbatim for the
+  maintainer to adjudicate.
 - `Directory.Build.props` centralizes `TargetFramework`, `Nullable`, `ImplicitUsings`,
   `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, and `IsPackable` per `core/architecture.md`,
   so the `.csproj` files carry only what is specific to them (`OutputType`, package references).
