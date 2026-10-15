@@ -107,9 +107,9 @@ claude-rules worktree and this repo's checkout is not reported as drift.
   exactly three inputs: the reviewed SHA and the accepted-findings list, both copied verbatim from
   the maintainer's adjudication rather than restated in the implementer's own words, plus the
   implementer's replies on those comment threads. Its report is relayed the same way as a full
-  review's. The maintainer may waive the
-  follow-up and approve directly, or ask for a second full review. Before that second review, the
-  PR description is rewritten to describe the whole PR as it stands.
+  review's. The maintainer may waive the follow-up and approve directly, or ask for a second full
+  review. Before that second review, the PR description is rewritten to describe the whole PR as
+  it stands.
 - `Directory.Build.props` centralizes `TargetFramework`, `Nullable`, `ImplicitUsings`,
   `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, and `IsPackable` per `core/architecture.md`,
   so the `.csproj` files carry only what is specific to them (`OutputType`, package references).
