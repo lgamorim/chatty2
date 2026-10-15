@@ -95,16 +95,19 @@ claude-rules worktree and this repo's checkout is not reported as drift.
   maintainer before opening any PR, per `overlays/workflow-team.md`, which takes precedence here.
   The reviewer role is wired as the `code-reviewer` subagent (`.claude/agents/code-reviewer.md`,
   from the claude-rules `.claude/rules/templates/reviewer-subagent.md`): it has no Edit/Write tools
-  and posts nothing itself, so it returns its findings as a report. The implementer passes it only
-  the PR description (intent, tests added, deliberate deviations) and relays the report verbatim as
+  and posts nothing itself, so it returns its findings as a report. The implementer session invokes
+  it on the maintainer's behalf. For a full review the implementer passes it only the PR
+  description (intent, tests added, deliberate deviations) and relays the report verbatim as
   inline PR comments plus a summary comment naming the reviewed commit, leaving them unresolved for
   the maintainer to adjudicate.
 - **Each PR gets one full review; later rounds are scoped follow-ups.** After the maintainer
   adjudicates and the accepted findings are fixed, a follow-up review reads only
   `git diff <reviewed-sha>..feature/x` and checks that each accepted finding is resolved and the
-  changed lines break no imported rule. Its inputs are the reviewed SHA and the accepted-findings
-  list, both taken verbatim from the maintainer's adjudication rather than the implementer's own
-  summary, plus the implementer's replies on those comment threads. The maintainer may waive the
+  changed lines break no imported rule. The implementer invokes it the same way and passes it
+  exactly three inputs: the reviewed SHA and the accepted-findings list, both copied verbatim from
+  the maintainer's adjudication rather than restated in the implementer's own words, plus the
+  implementer's replies on those comment threads. Its report is relayed the same way as a full
+  review's. The maintainer may waive the
   follow-up and approve directly, or ask for a second full review. Before that second review, the
   PR description is rewritten to describe the whole PR as it stands.
 - `Directory.Build.props` centralizes `TargetFramework`, `Nullable`, `ImplicitUsings`,
