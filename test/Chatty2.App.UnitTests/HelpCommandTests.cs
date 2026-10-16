@@ -15,6 +15,7 @@ public class HelpCommandTests
         Assert.False(result.IsError);
         Assert.NotNull(result.Message);
         Assert.Contains("/connect", result.Message);
+        Assert.Contains("/redial", result.Message);
         Assert.Contains("/disconnect", result.Message);
         Assert.Contains("/help", result.Message);
         Assert.Contains("/exit", result.Message);

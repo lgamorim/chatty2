@@ -8,6 +8,11 @@ the wire protocol.
 
 ## [Unreleased]
 
+### Added
+
+- `/redial` reconnects to the peer last reached with `/connect`, so a dropped session doesn't
+  mean retyping the address. Peers that dialed in are not remembered.
+
 ## [0.1.0] - 2026-08-11
 
 Initial alpha release.

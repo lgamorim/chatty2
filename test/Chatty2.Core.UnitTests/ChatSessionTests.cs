@@ -633,6 +633,155 @@ public class ChatSessionTests
         connection.Received(1).Dispose();
     }
 
+    [Fact]
+    public void Should_HaveNoLastDialedEndpoint_When_NothingHasBeenDialed()
+    {
+        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), "local");
+
+        Assert.Null(session.LastDialedEndpoint);
+    }
+
+    [Fact]
+    public async Task Should_RecordLastDialedEndpointBeforeRaisingPeerConnected_When_ConnectAsync_Succeeds()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = CreatePendingConnection("192.168.1.10:53001");
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        IPEndPoint? seenDuringPeerConnected = null;
+        session.PeerConnected += (_, _) => seenDuringPeerConnected = session.LastDialedEndpoint;
+
+        await session.ConnectAsync(IPAddress.Parse("192.168.1.10"), 53001, CancellationToken.None);
+
+        var expected = new IPEndPoint(IPAddress.Parse("192.168.1.10"), 53001);
+        Assert.Equal(expected, session.LastDialedEndpoint);
+        Assert.Equal(expected, seenDuringPeerConnected);
+    }
+
+    [Fact]
+    public async Task Should_NotChangeRememberedEndpoint_When_CallerMutatesTheReturnedEndpoint()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = CreatePendingConnection("192.168.1.10:53001");
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        await session.ConnectAsync(IPAddress.Parse("192.168.1.10"), 53001, CancellationToken.None);
+
+        // IPEndPoint is mutable; a consumer editing what it was handed must not be able to
+        // change the target the session remembers outside a completed dial.
+        var returned = session.LastDialedEndpoint;
+        Assert.NotNull(returned);
+        returned.Port = 1234;
+        returned.Address = IPAddress.Parse("10.9.9.9");
+
+        Assert.Equal(new IPEndPoint(IPAddress.Parse("192.168.1.10"), 53001), session.LastDialedEndpoint);
+    }
+
+    [Fact]
+    public async Task Should_NotRecordLastDialedEndpoint_When_ListenAsync_AcceptsAConnection()
+    {
+        var listener = Substitute.For<IPeerListener>();
+        var connection = CreatePendingConnection("10.0.0.5:61234");
+        listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "local");
+
+        await session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None);
+
+        // An inbound peer's remote port is ephemeral, so redialing it would be meaningless.
+        Assert.True(session.IsConnected);
+        Assert.Null(session.LastDialedEndpoint);
+    }
+
+    [Fact]
+    public async Task Should_NotRecordLastDialedEndpoint_When_DialFails()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<IPeerConnection>(new SocketException()));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+
+        await Assert.ThrowsAsync<SocketException>(
+            () => session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None));
+
+        Assert.Null(session.LastDialedEndpoint);
+    }
+
+    [Fact]
+    public async Task Should_NotRecordLastDialedEndpoint_When_HandshakeSendFailsAfterConnectAsync()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new IOException("broken")));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+
+        await Assert.ThrowsAsync<IOException>(
+            () => session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None));
+
+        Assert.Null(session.LastDialedEndpoint);
+    }
+
+    [Fact]
+    public async Task Should_KeepLastDialedEndpoint_When_SessionIsDisconnectedAndALaterDialFails()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        var receiveTcs = new TaskCompletionSource<string?>();
+        connection.ReceiveAsync(Arg.Any<CancellationToken>()).Returns(receiveTcs.Task);
+        connection.When(c => c.Dispose()).Do(_ => receiveTcs.TrySetResult(null));
+        connector.ConnectAsync(IPAddress.Parse("192.168.1.10"), 53001, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        connector.ConnectAsync(IPAddress.Parse("192.168.1.99"), 53002, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<IPeerConnection>(new SocketException()));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var disconnectedTcs = new TaskCompletionSource();
+        session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
+        await session.ConnectAsync(IPAddress.Parse("192.168.1.10"), 53001, CancellationToken.None);
+
+        session.Disconnect();
+        await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<SocketException>(
+            () => session.ConnectAsync(IPAddress.Parse("192.168.1.99"), 53002, CancellationToken.None));
+
+        Assert.Equal(new IPEndPoint(IPAddress.Parse("192.168.1.10"), 53001), session.LastDialedEndpoint);
+    }
+
+    [Fact]
+    public async Task Should_KeepFirstDialedEndpoint_When_SecondConcurrentConnectAsyncLosesTheClaim()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var firstConnectTcs = new TaskCompletionSource<IPeerConnection>();
+        var secondConnectTcs = new TaskCompletionSource<IPeerConnection>();
+        connector.ConnectAsync(IPAddress.Parse("192.168.1.10"), 53001, Arg.Any<CancellationToken>())
+            .Returns(firstConnectTcs.Task);
+        connector.ConnectAsync(IPAddress.Parse("192.168.1.99"), 53002, Arg.Any<CancellationToken>())
+            .Returns(secondConnectTcs.Task);
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var firstCall = session.ConnectAsync(IPAddress.Parse("192.168.1.10"), 53001, CancellationToken.None);
+        var secondCall = session.ConnectAsync(IPAddress.Parse("192.168.1.99"), 53002, CancellationToken.None);
+
+        firstConnectTcs.SetResult(CreatePendingConnection("first"));
+        await firstCall;
+        secondConnectTcs.SetResult(CreatePendingConnection("second"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => secondCall);
+
+        Assert.Equal(new IPEndPoint(IPAddress.Parse("192.168.1.10"), 53001), session.LastDialedEndpoint);
+    }
+
     private static IPeerConnection CreatePendingConnection(string remoteEndPoint)
     {
         var connection = Substitute.For<IPeerConnection>();

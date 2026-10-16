@@ -43,6 +43,7 @@ using (session)
     ICommand[] commands =
     [
         new ConnectCommand(session, listeningPort),
+        new RedialCommand(session, listeningPort),
         new DisconnectCommand(session),
         new HelpCommand(),
         new ExitCommand()

@@ -11,6 +11,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     private readonly string _localUserName = ValidateLocalUserName(localUserName);
     private readonly Lock _gate = new();
     private IPeerConnection? _activeConnection;
+    private IPEndPoint? _lastDialedEndpoint;
     private CancellationTokenSource? _listenCts;
     private Task _previousListenAttempt = Task.CompletedTask;
     private bool _disposed;
@@ -22,6 +23,20 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             lock (_gate)
             {
                 return _activeConnection is not null;
+            }
+        }
+    }
+
+    public IPEndPoint? LastDialedEndpoint
+    {
+        get
+        {
+            lock (_gate)
+            {
+                // IPEndPoint (and its IPAddress) are mutable, so hand out a copy: otherwise a
+                // consumer could change the remembered target without a completed dial and
+                // without ever taking _gate.
+                return _lastDialedEndpoint is { } endpoint ? (IPEndPoint)endpoint.Create(endpoint.Serialize()) : null;
             }
         }
     }
@@ -150,7 +165,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         cts?.Cancel();
 
         var candidate = await connector.ConnectAsync(ipAddress, port, cancellationToken);
-        await ClaimAsync(candidate);
+        await ClaimAsync(candidate, new IPEndPoint(ipAddress, port));
     }
 
     public Task SendAsync(string message, CancellationToken cancellationToken)
@@ -195,7 +210,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         cts?.Dispose();
     }
 
-    private async Task ClaimAsync(IPeerConnection candidate)
+    private async Task ClaimAsync(IPeerConnection candidate, IPEndPoint? dialedEndpoint = null)
     {
         lock (_gate)
         {
@@ -228,6 +243,16 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
             candidate.Dispose();
             throw;
+        }
+
+        // Recorded only now that the handshake went out, and before PeerConnected so a
+        // handler already sees it. dialedEndpoint is null for accepted (inbound) peers.
+        if (dialedEndpoint is not null)
+        {
+            lock (_gate)
+            {
+                _lastDialedEndpoint = dialedEndpoint;
+            }
         }
 
         PeerConnected?.Invoke(this, new PeerConnectedEventArgs(candidate.RemoteEndPoint));
