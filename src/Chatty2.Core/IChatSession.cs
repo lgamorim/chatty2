@@ -6,6 +6,13 @@ public interface IChatSession : IDisposable
 {
     bool IsConnected { get; }
 
+    /// <summary>
+    /// The target of the most recent outbound dial that completed its handshake, or
+    /// <c>null</c> if none has. Inbound peers are never recorded: their remote port is
+    /// ephemeral, so it can't be dialed back.
+    /// </summary>
+    IPEndPoint? LastDialedEndpoint { get; }
+
     event EventHandler<ChatMessageReceivedEventArgs>? MessageReceived;
 
     event EventHandler<PeerConnectedEventArgs>? PeerConnected;

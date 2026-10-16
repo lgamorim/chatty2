@@ -74,12 +74,19 @@ e.g. `[14:30:05] [Alice] hello`.
 | Command | Description |
 | --- | --- |
 | `/connect <ip-address> <port>` | Connect to a peer at the given IP address and port. Both arguments are required. |
+| `/redial` | Reconnect to the peer you last reached with `/connect`, so you don't have to retype the address after a drop. Takes no arguments. |
 | `/disconnect` | End the current chat session without closing the app. The app resumes listening automatically. |
 | `/help` | Show the available commands and the message-sending rule. |
 | `/exit` | Close the application. |
 
 Any line that doesn't start with `/` is sent as a chat message to the connected peer. If you
 haven't connected to anyone yet, you'll get a friendly warning instead of silently doing nothing.
+
+`/redial` only remembers peers *you* dialed: the last `/connect` that completed its handshake,
+kept in memory for the life of the process. A peer that connected to you isn't remembered, since
+the port it connects from is chosen by its OS and can't be dialed back. A failed `/connect` or
+`/redial` leaves the remembered peer unchanged, and with nothing remembered `/redial` tells you
+to use `/connect`.
 
 ### Example: chatting between two computers
 
@@ -171,8 +178,9 @@ the abortive RST behavior instead, which is why only the send side is shut down.
 
 ### Command pattern
 
-`/connect`, `/disconnect`, `/help`, and `/exit` are each an `ICommand` implementation
-(`ConnectCommand`, `DisconnectCommand`, `HelpCommand`, `ExitCommand`). `ConsoleAppRunner` holds a
+`/connect`, `/redial`, `/disconnect`, `/help`, and `/exit` are each an `ICommand` implementation
+(`ConnectCommand`, `RedialCommand`, `DisconnectCommand`, `HelpCommand`, `ExitCommand`;
+`/connect` and `/redial` share the dial-and-recover logic in `PeerDialer`). `ConsoleAppRunner` holds a
 case-insensitive name-to-command lookup built from whatever commands it's given in its
 constructor — adding a new command later means writing one more `ICommand` class and registering
 it in `Program.cs`, with no changes to the runner itself. Commands return a `CommandResult`

@@ -34,6 +34,39 @@ public class ChatSessionIntegrationTests
         Assert.True(session.IsConnected);
     }
 
+    [Fact]
+    public async Task Should_ReconnectToLastDialedEndpoint_When_TheSessionEndedAndThePeerIsListeningAgain()
+    {
+        var port = GetFreeLoopbackPort();
+        using var server = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "server");
+        using var client = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "client");
+        var serverDisconnected = new TaskCompletionSource();
+        var clientDisconnected = new TaskCompletionSource();
+        server.Disconnected += (_, _) => serverDisconnected.TrySetResult();
+        client.Disconnected += (_, _) => clientDisconnected.TrySetResult();
+
+        var firstListen = server.ListenAsync(port, CancellationToken.None);
+        await client.ConnectAsync(IPAddress.Loopback, port, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await firstListen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        client.Disconnect();
+        await Task.WhenAll(serverDisconnected.Task, clientDisconnected.Task)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Mirrors /redial: the app re-arms listening after a disconnect, and the dialing
+        // side reuses the endpoint the session remembered instead of being retyped.
+        var secondListen = server.ListenAsync(port, CancellationToken.None);
+        var endpoint = client.LastDialedEndpoint;
+        Assert.NotNull(endpoint);
+        await client.ConnectAsync(endpoint.Address, endpoint.Port, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await secondListen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.True(client.IsConnected);
+        Assert.True(server.IsConnected);
+    }
+
     private static int GetFreeLoopbackPort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
