@@ -673,7 +673,8 @@ public class ChatSessionTests
 
         // IPEndPoint is mutable; a consumer editing what it was handed must not be able to
         // change the target the session remembers outside a completed dial.
-        var returned = session.LastDialedEndpoint!;
+        var returned = session.LastDialedEndpoint;
+        Assert.NotNull(returned);
         returned.Port = 1234;
         returned.Address = IPAddress.Parse("10.9.9.9");
 
