@@ -732,7 +732,7 @@ public class ChatSessionTests
     }
 
     [Fact]
-    public async Task Should_KeepLastDialedEndpoint_When_PeerDisconnectsAndALaterDialFails()
+    public async Task Should_KeepLastDialedEndpoint_When_SessionIsDisconnectedAndALaterDialFails()
     {
         var connector = Substitute.For<IPeerConnector>();
         var connection = Substitute.For<IPeerConnection>();
