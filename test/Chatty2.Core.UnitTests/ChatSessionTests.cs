@@ -661,6 +661,26 @@ public class ChatSessionTests
     }
 
     [Fact]
+    public async Task Should_NotChangeRememberedEndpoint_When_CallerMutatesTheReturnedEndpoint()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = CreatePendingConnection("192.168.1.10:53001");
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        await session.ConnectAsync(IPAddress.Parse("192.168.1.10"), 53001, CancellationToken.None);
+
+        // IPEndPoint is mutable; a consumer editing what it was handed must not be able to
+        // change the target the session remembers outside a completed dial.
+        var returned = session.LastDialedEndpoint!;
+        returned.Port = 1234;
+        returned.Address = IPAddress.Parse("10.9.9.9");
+
+        Assert.Equal(new IPEndPoint(IPAddress.Parse("192.168.1.10"), 53001), session.LastDialedEndpoint);
+    }
+
+    [Fact]
     public async Task Should_NotRecordLastDialedEndpoint_When_ListenAsync_AcceptsAConnection()
     {
         var listener = Substitute.For<IPeerListener>();

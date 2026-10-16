@@ -33,7 +33,10 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         {
             lock (_gate)
             {
-                return _lastDialedEndpoint;
+                // IPEndPoint (and its IPAddress) are mutable, so hand out a copy: otherwise a
+                // consumer could change the remembered target without a completed dial and
+                // without ever taking _gate.
+                return _lastDialedEndpoint is { } endpoint ? (IPEndPoint)endpoint.Create(endpoint.Serialize()) : null;
             }
         }
     }
