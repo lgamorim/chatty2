@@ -28,7 +28,9 @@ The chat app is the vehicle. The workflow is what I was actually testing.
   someone connecting to you, or you connecting to them — becomes the active chat session.
 - Only one peer connection is active at a time in this alpha. After a disconnect (peer-initiated,
   network drop, or your own `/disconnect`), the app automatically goes back to listening, so a
-  single run can handle several chat sessions one after another.
+  single run can handle several chat sessions one after another. The notice names the peer and
+  says which of the three happened, e.g. `Bob disconnected.`, `Connection to Bob was lost.` or
+  `Disconnected from Bob.`
 
 ## Usage
 
@@ -179,6 +181,17 @@ still cannot grow memory past the limit, but the discard simply waits for one; t
   raises a `Disconnected` event. `ConsoleAppRunner` reacts to that event (and to a failed
   `/connect`) by calling `ListenAsync` again, which is what makes the "auto-resume listening"
   behavior work without `ChatSession` needing any retry/restart logic of its own.
+- The `Disconnected` event says why the session ended and who it was with
+  (`DisconnectedEventArgs`: a `DisconnectReason` and the peer's name, `null` if it never
+  identified itself), so the console can print `Bob disconnected.` (the peer ended the stream
+  cleanly), `Connection to Bob was lost.` (reading failed, e.g. a reset) or
+  `Disconnected from Bob.` (this side ran `/disconnect` or exited). A `/disconnect` or `Dispose` marks the connection
+  under the same `_gate` lock before closing it, and the receive loop reports that as the local
+  reason however the socket reacts to being closed. This uses only what TCP already tells us, so
+  the wire protocol is unchanged and older peers are unaffected. The limit is that it cannot tell
+  a peer that quit on purpose from one that crashed but still sent an orderly end of stream; both
+  read as "disconnected". A peer that closes while the other side's handshake line is still
+  unread produces a reset, which reads as "lost".
 - `ListenAsync` is always invoked fire-and-forget by its callers, so any exception that escaped
   it (e.g. a `SocketException` from `TcpListener.Start()` because the port is already in use)
   would otherwise go unobserved — listening would die silently with no feedback. `ListenAsync`

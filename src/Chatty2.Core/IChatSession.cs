@@ -25,7 +25,7 @@ public interface IChatSession : IDisposable
     /// </summary>
     event EventHandler<MessageDroppedEventArgs>? MessageDropped;
 
-    event EventHandler? Disconnected;
+    event EventHandler<DisconnectedEventArgs>? Disconnected;
 
     event EventHandler<ListenFailedEventArgs>? ListenFailed;
 

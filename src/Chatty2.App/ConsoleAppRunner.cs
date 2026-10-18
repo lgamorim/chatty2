@@ -192,9 +192,23 @@ public sealed class ConsoleAppRunner
         }
     }
 
-    private void OnDisconnected(object? sender, EventArgs e)
+    private void OnDisconnected(object? sender, DisconnectedEventArgs e)
     {
-        WriteInfo("Peer disconnected.");
+        // The name comes from the event, not _peerName: it belongs to the connection that
+        // just ended, whereas _peerName may already have been replaced by a newer one.
+        switch (e.Reason)
+        {
+            case DisconnectReason.LocalRequest:
+                WriteInfo($"Disconnected from {e.PeerName ?? "the peer"}.");
+                break;
+            case DisconnectReason.ConnectionLost:
+                WriteError($"Connection to {e.PeerName ?? "the peer"} was lost.");
+                break;
+            default:
+                WriteInfo($"{e.PeerName ?? "Peer"} disconnected.");
+                break;
+        }
+
         lock (_outputLock)
         {
             _peerName = "peer";

@@ -15,6 +15,10 @@ the wire protocol.
 
 ### Changed
 
+- The disconnect notice now names the peer and says what happened: `Bob disconnected.` when the
+  peer ended the session, `Connection to Bob was lost.` when the connection dropped, and
+  `Disconnected from Bob.` after your own `/disconnect` (previously all three printed
+  `Peer disconnected.`). The wire protocol is unchanged, so older peers are unaffected.
 - Chat messages are limited to 4096 characters. Typing a longer line is refused locally with a
   "too long" message. A longer line received from a peer (for example from an older version,
   which has no limit) is discarded with a notice and the session stays open.
