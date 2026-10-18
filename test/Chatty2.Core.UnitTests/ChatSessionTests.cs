@@ -802,6 +802,21 @@ public class ChatSessionTests
     }
 
     [Fact]
+    public async Task Should_ThrowMessageTooLongRatherThanNotConnected_When_OversizedMessageIsSentWhileDisconnected()
+    {
+        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), "local");
+        var tooLong = new string('x', ChatSession.MaxMessageLength + 1);
+
+        var exception = await Assert.ThrowsAsync<MessageTooLongException>(
+            () => session.SendAsync(tooLong, CancellationToken.None));
+
+        // Pins the order of the two guards: the argument check comes before the state check,
+        // so an invalid message is reported as such whether or not a peer is connected.
+        Assert.Equal(ChatSession.MaxMessageLength, exception.MaxLength);
+        Assert.False(session.IsConnected);
+    }
+
+    [Fact]
     public async Task Should_SendMessage_When_LengthEqualsTheLimit()
     {
         var connector = Substitute.For<IPeerConnector>();
