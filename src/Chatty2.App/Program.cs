@@ -45,6 +45,7 @@ using (session)
         new ConnectCommand(session, listeningPort),
         new RedialCommand(session, listeningPort),
         new DisconnectCommand(session),
+        new StatusCommand(session, userName, listeningPort),
         new HelpCommand(),
         new ExitCommand()
     ];

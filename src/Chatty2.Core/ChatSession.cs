@@ -15,6 +15,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     private readonly string _localUserName = ValidateLocalUserName(localUserName);
     private readonly Lock _gate = new();
     private IPeerConnection? _activeConnection;
+    private PeerInfo? _peer;
     private IPEndPoint? _lastDialedEndpoint;
     private IPeerConnection? _locallyClosedConnection;
     private CancellationTokenSource? _listenCts;
@@ -28,6 +29,17 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             lock (_gate)
             {
                 return _activeConnection is not null;
+            }
+        }
+    }
+
+    public PeerInfo? Peer
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _peer;
             }
         }
     }
@@ -219,6 +231,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             _locallyClosedConnection = _activeConnection;
             _activeConnection?.Dispose();
             _activeConnection = null;
+            _peer = null;
         }
 
         cts?.Cancel();
@@ -236,6 +249,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             }
 
             _activeConnection = candidate;
+            _peer = new PeerInfo(candidate.RemoteEndPoint, null);
         }
 
         try
@@ -253,7 +267,11 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             // connecting and every future ConnectAsync/SendAsync call fails until restart.
             lock (_gate)
             {
-                if (ReferenceEquals(_activeConnection, candidate)) _activeConnection = null;
+                if (ReferenceEquals(_activeConnection, candidate))
+                {
+                    _activeConnection = null;
+                    _peer = null;
+                }
             }
 
             candidate.Dispose();
@@ -317,6 +335,17 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         return value[..length];
     }
 
+    private void SetPeerName(IPeerConnection connection, string name)
+    {
+        lock (_gate)
+        {
+            // Only while this connection is still the active one: a stale loop must not
+            // write a name onto whichever peer has replaced it.
+            if (ReferenceEquals(_activeConnection, connection) && _peer is not null)
+                _peer = _peer with { Name = name };
+        }
+    }
+
     private async Task ReceiveLoopAsync(IPeerConnection connection)
     {
         string? peerName = null;
@@ -356,6 +385,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                     if (TryParseHandshake(message, out var peerUserName))
                     {
                         peerName = peerUserName;
+                        SetPeerName(connection, peerUserName);
                         PeerIdentified?.Invoke(this, new PeerIdentifiedEventArgs(peerUserName));
                         continue;
                     }
@@ -368,7 +398,11 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         {
             lock (_gate)
             {
-                if (ReferenceEquals(_activeConnection, connection)) _activeConnection = null;
+                if (ReferenceEquals(_activeConnection, connection))
+                {
+                    _activeConnection = null;
+                    _peer = null;
+                }
 
                 if (ReferenceEquals(_locallyClosedConnection, connection))
                 {

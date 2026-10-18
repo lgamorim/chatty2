@@ -132,6 +132,45 @@ public class ChatSessionIntegrationTests
     }
 
     [Fact]
+    public async Task Should_ExposeEachSidesPeerWithItsName_AndClearItAfterTheSessionEnds()
+    {
+        var port = GetFreeLoopbackPort();
+        using var server = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "server");
+        using var client = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "client");
+        var serverIdentifiedPeer = new TaskCompletionSource();
+        var clientIdentifiedPeer = new TaskCompletionSource();
+        var serverDisconnected = new TaskCompletionSource();
+        var clientDisconnected = new TaskCompletionSource();
+        server.PeerIdentified += (_, _) => serverIdentifiedPeer.TrySetResult();
+        client.PeerIdentified += (_, _) => clientIdentifiedPeer.TrySetResult();
+        server.Disconnected += (_, _) => serverDisconnected.TrySetResult();
+        client.Disconnected += (_, _) => clientDisconnected.TrySetResult();
+
+        var listen = server.ListenAsync(port, CancellationToken.None);
+        await client.ConnectAsync(IPAddress.Loopback, port, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await listen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await Task.WhenAll(serverIdentifiedPeer.Task, clientIdentifiedPeer.Task)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Only the name and the port are asserted on the endpoints: how the address is
+        // written (plain IPv4 or IPv4-mapped IPv6) depends on the platform's socket.
+        Assert.Equal("client", server.Peer?.Name);
+        Assert.Equal("server", client.Peer?.Name);
+        Assert.EndsWith($":{port}", client.Peer?.RemoteEndPoint);
+        Assert.False(string.IsNullOrEmpty(server.Peer?.RemoteEndPoint));
+
+        // Both handshakes have been read, so closing leaves nothing unread (see the
+        // disconnect test above for why that matters).
+        client.Disconnect();
+        await Task.WhenAll(serverDisconnected.Task, clientDisconnected.Task)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Null(server.Peer);
+        Assert.Null(client.Peer);
+    }
+
+    [Fact]
     public async Task Should_DropOversizedLineAndKeepTheSessionUp_When_PeerSendsOne()
     {
         var port = GetFreeLoopbackPort();

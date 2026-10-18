@@ -6,6 +6,9 @@ public interface IChatSession : IDisposable
 {
     bool IsConnected { get; }
 
+    /// <summary>The current peer, or <c>null</c> when not connected.</summary>
+    PeerInfo? Peer { get; }
+
     /// <summary>
     /// The target of the most recent outbound dial that completed its handshake, or
     /// <c>null</c> if none has. Inbound peers are never recorded: their remote port is

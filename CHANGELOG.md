@@ -10,6 +10,8 @@ the wire protocol.
 
 ### Added
 
+- `/status` shows your display name, the port you were started listening on, and who you are
+  connected to (name and address), or that you are not connected.
 - `/redial` reconnects to the peer last reached with `/connect`, so a dropped session doesn't
   mean retyping the address. Peers that dialed in are not remembered.
 
