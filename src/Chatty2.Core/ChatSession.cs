@@ -5,6 +5,10 @@ namespace Chatty2.Core;
 public sealed class ChatSession(IPeerListener listener, IPeerConnector connector, string localUserName) : IChatSession
 {
     public const int DefaultPort = 53000;
+
+    /// <summary>The longest chat line, in characters, that is sent or accepted.</summary>
+    public const int MaxMessageLength = 4096;
+
     private const string HandshakePrefix = "NAME:";
     private const int MaxUserNameLength = 64;
 
@@ -46,6 +50,8 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     public event EventHandler<PeerConnectedEventArgs>? PeerConnected;
 
     public event EventHandler<PeerIdentifiedEventArgs>? PeerIdentified;
+
+    public event EventHandler<MessageDroppedEventArgs>? MessageDropped;
 
     public event EventHandler? Disconnected;
 
@@ -171,6 +177,10 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     public Task SendAsync(string message, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(message);
+
+        // Refused here, before anything reaches the wire: a conforming peer would drop the
+        // line anyway, so failing locally tells the user instead of silently losing it.
+        if (message.Length > MaxMessageLength) throw new MessageTooLongException(MaxMessageLength);
 
         IPeerConnection connection;
         lock (_gate)
@@ -314,6 +324,15 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                 try
                 {
                     message = await connection.ReceiveAsync(CancellationToken.None);
+                }
+                catch (MessageTooLongException exception)
+                {
+                    // The connection has already discarded the offending line and is
+                    // positioned at the next one, so this is not a reason to end the session.
+                    // It still used up the first-line slot: a later "NAME:" line is chat text.
+                    isFirstMessage = false;
+                    MessageDropped?.Invoke(this, new MessageDroppedEventArgs(exception.MaxLength));
+                    continue;
                 }
                 catch (Exception)
                 {

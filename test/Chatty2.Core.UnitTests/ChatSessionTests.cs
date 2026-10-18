@@ -782,6 +782,105 @@ public class ChatSessionTests
         Assert.Equal(new IPEndPoint(IPAddress.Parse("192.168.1.10"), 53001), session.LastDialedEndpoint);
     }
 
+    [Fact]
+    public async Task Should_ThrowMessageTooLongWithoutSending_When_MessageExceedsTheLimit()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = CreatePendingConnection("peer");
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        var tooLong = new string('x', ChatSession.MaxMessageLength + 1);
+
+        var exception = await Assert.ThrowsAsync<MessageTooLongException>(
+            () => session.SendAsync(tooLong, CancellationToken.None));
+
+        Assert.Equal(ChatSession.MaxMessageLength, exception.MaxLength);
+        await connection.DidNotReceive().SendAsync(tooLong, Arg.Any<CancellationToken>());
+        Assert.True(session.IsConnected);
+    }
+
+    [Fact]
+    public async Task Should_SendMessage_When_LengthEqualsTheLimit()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = CreatePendingConnection("peer");
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        var atLimit = new string('x', ChatSession.MaxMessageLength);
+
+        await session.SendAsync(atLimit, CancellationToken.None);
+
+        await connection.Received(1).SendAsync(atLimit, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Should_RaiseMessageDroppedAndKeepReceiving_When_PeerSendsAnOversizedLine()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(
+                Task.FromResult<string?>("NAME:Bob"),
+                Task.FromException<string?>(new MessageTooLongException(ChatSession.MaxMessageLength)),
+                Task.FromResult<string?>("hello"),
+                Task.FromResult<string?>(null));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var received = new List<string>();
+        var dropped = new List<MessageDroppedEventArgs>();
+        var disconnectedTcs = new TaskCompletionSource();
+        session.MessageReceived += (_, e) => received.Add(e.Message);
+        session.MessageDropped += (_, e) => dropped.Add(e);
+        session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // The oversized line must not end the session: the line after it is still delivered
+        // and the session only ends when the stream itself does.
+        var notice = Assert.Single(dropped);
+        Assert.Equal(ChatSession.MaxMessageLength, notice.MaxLength);
+        Assert.Equal(["hello"], received);
+    }
+
+    [Fact]
+    public async Task Should_TreatNextLineAsAnOrdinaryMessage_When_TheOversizedLineWasTheFirstOne()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(
+                Task.FromException<string?>(new MessageTooLongException(ChatSession.MaxMessageLength)),
+                Task.FromResult<string?>("NAME:Bob"),
+                Task.FromResult<string?>(null));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var received = new List<string>();
+        var identifiedCount = 0;
+        var disconnectedTcs = new TaskCompletionSource();
+        session.MessageReceived += (_, e) => received.Add(e.Message);
+        session.PeerIdentified += (_, _) => identifiedCount++;
+        session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // A dropped first line still used up the handshake slot, so a later "NAME:" line is
+        // plain chat text rather than a late identification.
+        Assert.Equal(0, identifiedCount);
+        Assert.Equal(["NAME:Bob"], received);
+    }
+
     private static IPeerConnection CreatePendingConnection(string remoteEndPoint)
     {
         var connection = Substitute.For<IPeerConnection>();

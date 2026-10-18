@@ -42,6 +42,7 @@ public sealed class ConsoleAppRunner
         _session.MessageReceived += OnMessageReceived;
         _session.PeerConnected += OnPeerConnected;
         _session.PeerIdentified += OnPeerIdentified;
+        _session.MessageDropped += OnMessageDropped;
         _session.Disconnected += OnDisconnected;
         _session.ListenFailed += OnListenFailed;
     }
@@ -67,6 +68,7 @@ public sealed class ConsoleAppRunner
             _session.MessageReceived -= OnMessageReceived;
             _session.PeerConnected -= OnPeerConnected;
             _session.PeerIdentified -= OnPeerIdentified;
+            _session.MessageDropped -= OnMessageDropped;
             _session.Disconnected -= OnDisconnected;
             _session.ListenFailed -= OnListenFailed;
             _session.Dispose();
@@ -143,6 +145,10 @@ public sealed class ConsoleAppRunner
         {
             await _session.SendAsync(message, _cancellationToken);
         }
+        catch (MessageTooLongException exception)
+        {
+            WriteError($"Message not sent: it is too long (the limit is {exception.MaxLength} characters).");
+        }
         catch (Exception)
         {
             WriteError("Message could not be sent. The peer may have disconnected.");
@@ -159,6 +165,17 @@ public sealed class ConsoleAppRunner
 
         var timestamp = _timeProvider.GetLocalNow().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
         WriteInfo($"[{timestamp}] [{peerName}] {e.Message}");
+    }
+
+    private void OnMessageDropped(object? sender, MessageDroppedEventArgs e)
+    {
+        string peerName;
+        lock (_outputLock)
+        {
+            peerName = _peerName;
+        }
+
+        WriteError($"Dropped an oversized message from {peerName}: the limit is {e.MaxLength} characters.");
     }
 
     private void OnPeerConnected(object? sender, PeerConnectedEventArgs e) => WriteInfo($"Connected to {e.RemoteEndPoint}.");
