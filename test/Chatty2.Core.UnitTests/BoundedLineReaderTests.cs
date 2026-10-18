@@ -38,9 +38,13 @@ public class BoundedLineReaderTests
     {
         var reader = new BoundedLineReader(new StringReader("one\ntail"), 100);
 
-        Assert.Equal("one", await reader.ReadLineAsync(TestContext.Current.CancellationToken));
-        Assert.Equal("tail", await reader.ReadLineAsync(TestContext.Current.CancellationToken));
-        Assert.Null(await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        var first = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+        var second = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+        var third = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("one", first);
+        Assert.Equal("tail", second);
+        Assert.Null(third);
     }
 
     [Fact]
@@ -48,7 +52,9 @@ public class BoundedLineReaderTests
     {
         var reader = new BoundedLineReader(new StringReader(string.Empty), 100);
 
-        Assert.Null(await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        var line = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(line);
     }
 
     [Fact]
@@ -58,9 +64,13 @@ public class BoundedLineReaderTests
         // the second half of the same terminator and must not surface as an empty line.
         var reader = new BoundedLineReader(new OneCharAtATimeReader("a\r\nb\n"), 100);
 
-        Assert.Equal("a", await reader.ReadLineAsync(TestContext.Current.CancellationToken));
-        Assert.Equal("b", await reader.ReadLineAsync(TestContext.Current.CancellationToken));
-        Assert.Null(await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        var first = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+        var second = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+        var third = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("a", first);
+        Assert.Equal("b", second);
+        Assert.Null(third);
     }
 
     [Fact]
@@ -69,7 +79,9 @@ public class BoundedLineReaderTests
         var line = new string('x', 10);
         var reader = new BoundedLineReader(new StringReader(line + "\n"), 10);
 
-        Assert.Equal(line, await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        var result = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(line, result);
     }
 
     [Fact]
@@ -78,8 +90,11 @@ public class BoundedLineReaderTests
         var line = new string('x', 5000);
         var reader = new BoundedLineReader(new StringReader(line + "\nnext\n"), 6000);
 
-        Assert.Equal(line, await reader.ReadLineAsync(TestContext.Current.CancellationToken));
-        Assert.Equal("next", await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        var first = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+        var second = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(line, first);
+        Assert.Equal("next", second);
     }
 
     [Fact]
@@ -90,8 +105,10 @@ public class BoundedLineReaderTests
         var exception = await Assert.ThrowsAsync<MessageTooLongException>(
             () => reader.ReadLineAsync(TestContext.Current.CancellationToken));
 
+        var next = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
         Assert.Equal(10, exception.MaxLength);
-        Assert.Equal("next", await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("next", next);
     }
 
     [Fact]
@@ -102,8 +119,11 @@ public class BoundedLineReaderTests
         await Assert.ThrowsAsync<MessageTooLongException>(
             () => reader.ReadLineAsync(TestContext.Current.CancellationToken));
 
-        Assert.Equal("next", await reader.ReadLineAsync(TestContext.Current.CancellationToken));
-        Assert.Null(await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        var next = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+        var afterwards = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("next", next);
+        Assert.Null(afterwards);
     }
 
     [Fact]
@@ -114,7 +134,9 @@ public class BoundedLineReaderTests
         await Assert.ThrowsAsync<MessageTooLongException>(
             () => reader.ReadLineAsync(TestContext.Current.CancellationToken));
 
-        Assert.Null(await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        var afterwards = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(afterwards);
     }
 
     [Fact]
@@ -125,7 +147,9 @@ public class BoundedLineReaderTests
         await Assert.ThrowsAsync<MessageTooLongException>(
             () => reader.ReadLineAsync(TestContext.Current.CancellationToken));
 
-        Assert.Equal("ok", await reader.ReadLineAsync(TestContext.Current.CancellationToken));
+        var next = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("ok", next);
     }
 
     [Fact]
