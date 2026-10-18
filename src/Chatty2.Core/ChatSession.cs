@@ -341,8 +341,8 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         {
             // Only while this connection is still the active one: a stale loop must not
             // write a name onto whichever peer has replaced it.
-            if (ReferenceEquals(_activeConnection, connection) && _peer is not null)
-                _peer = _peer with { Name = name };
+            if (ReferenceEquals(_activeConnection, connection) && _peer is { } peer)
+                _peer = peer with { Name = name };
         }
     }
 

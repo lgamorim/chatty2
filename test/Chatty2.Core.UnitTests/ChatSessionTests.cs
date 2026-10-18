@@ -1204,6 +1204,34 @@ public class ChatSessionTests
     }
 
     [Fact]
+    public async Task Should_NotNameTheCurrentPeer_When_AnAbandonedConnectionsLoopReadsAHandshakeLate()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var abandoned = Substitute.For<IPeerConnection>();
+        abandoned.RemoteEndPoint.Returns("abandoned");
+        var abandonedReceive = new TaskCompletionSource<string?>();
+        abandoned.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(abandonedReceive.Task, Task.FromResult<string?>(null));
+        var current = CreatePendingConnection("current");
+        connector.ConnectAsync(IPAddress.Loopback, 53001, Arg.Any<CancellationToken>()).Returns(Task.FromResult(abandoned));
+        connector.ConnectAsync(IPAddress.Loopback, 53002, Arg.Any<CancellationToken>()).Returns(Task.FromResult(current));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var abandonedEnded = new TaskCompletionSource();
+        session.Disconnected += (_, _) => abandonedEnded.TrySetResult();
+        await session.ConnectAsync(IPAddress.Loopback, 53001, CancellationToken.None);
+
+        // Dispose releases the active connection at once while its receive loop is still
+        // waiting on the socket; ConnectAsync does not check for disposal, so a new peer can
+        // then be claimed before that old loop wakes up.
+        session.Dispose();
+        await session.ConnectAsync(IPAddress.Loopback, 53002, CancellationToken.None);
+        abandonedReceive.SetResult("NAME:Stale");
+        await abandonedEnded.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new PeerInfo("current", null), session.Peer);
+    }
+
+    [Fact]
     public async Task Should_NotCarryTheEarlierPeersName_When_ALaterPeerNeverIdentifies()
     {
         var connector = Substitute.For<IPeerConnector>();
