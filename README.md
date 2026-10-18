@@ -83,6 +83,7 @@ the lines after it arrive normally.
 | `/connect <ip-address> <port>` | Connect to a peer at the given IP address and port. Both arguments are required. |
 | `/redial` | Reconnect to the peer you last reached with `/connect`, so you don't have to retype the address after a drop. Takes no arguments. |
 | `/disconnect` | End the current chat session without closing the app. The app resumes listening automatically. |
+| `/status` | Show your display name, the port you were started listening on, and whether you are connected (to whom, and from which address). Takes no arguments. |
 | `/help` | Show the available commands and the message-sending rule. |
 | `/exit` | Close the application. |
 
@@ -194,6 +195,12 @@ still cannot grow memory past the limit, but the discard simply waits for one; t
   read as "disconnected". A peer that closes while the other side's handshake line is still
   unread can produce a reset. Whether that reads as "lost" or as an orderly close depends on the
   platform's TCP stack, which can report a clean end of stream when a reset follows a FIN.
+- `ChatSession.Peer` (a `PeerInfo`: the connection's remote endpoint plus the peer's name once its
+  handshake has been read, `null` when not connected) is kept beside `_activeConnection` and
+  changes under the same `_gate` lock: set when a connection is claimed, given its name just
+  before `PeerIdentified` is raised, and cleared before `Disconnected` is raised, so `/status` and
+  event handlers never see a stale peer. The runner's own peer name, which labels incoming
+  messages, is separate.
 - `ListenAsync` is always invoked fire-and-forget by its callers, so any exception that escaped
   it (e.g. a `SocketException` from `TcpListener.Start()` because the port is already in use)
   would otherwise go unobserved — listening would die silently with no feedback. `ListenAsync`
@@ -209,8 +216,9 @@ still cannot grow memory past the limit, but the discard simply waits for one; t
 
 ### Command pattern
 
-`/connect`, `/redial`, `/disconnect`, `/help`, and `/exit` are each an `ICommand` implementation
-(`ConnectCommand`, `RedialCommand`, `DisconnectCommand`, `HelpCommand`, `ExitCommand`;
+`/connect`, `/redial`, `/disconnect`, `/status`, `/help`, and `/exit` are each an `ICommand`
+implementation (`ConnectCommand`, `RedialCommand`, `DisconnectCommand`, `StatusCommand`,
+`HelpCommand`, `ExitCommand`;
 `/connect` and `/redial` share the dial-and-recover logic in `PeerDialer`). `ConsoleAppRunner` holds a
 case-insensitive name-to-command lookup built from whatever commands it's given in its
 constructor — adding a new command later means writing one more `ICommand` class and registering
@@ -254,6 +262,9 @@ state.
 - No guard against connecting to your own machine's IP/loopback (undefined but harmless).
 - No read timeout or heartbeat: a connected peer that goes silent (or never finishes a line) holds
   the single connection slot until it disconnects or you run `/disconnect`.
+- `/status` shows the port the app was started with, not whether listening is currently active
+  (for example, it still shows the port after a "Stopped listening" error or while a `/connect`
+  is dialing). The connection line, by contrast, always reflects the live session.
 - The listening port is configurable at startup (`--port`/`-p`); there's no in-app command to
   change it once the app is running.
 

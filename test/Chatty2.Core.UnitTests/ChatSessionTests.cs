@@ -1066,6 +1066,193 @@ public class ChatSessionTests
         Assert.Equal([DisconnectReason.LocalRequest, DisconnectReason.PeerClosed], reasons);
     }
 
+    [Fact]
+    public void Should_HaveNoPeer_When_NotConnected()
+    {
+        var session = new ChatSession(Substitute.For<IPeerListener>(), Substitute.For<IPeerConnector>(), "local");
+
+        Assert.Null(session.Peer);
+    }
+
+    [Fact]
+    public async Task Should_ExposePeerWithEndpointAndNoName_When_DialedPeerHasNotIdentifiedYet()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = CreatePendingConnection("192.168.1.10:53001");
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        PeerInfo? seenDuringPeerConnected = null;
+        session.PeerConnected += (_, _) => seenDuringPeerConnected = session.Peer;
+
+        await session.ConnectAsync(IPAddress.Parse("192.168.1.10"), 53001, CancellationToken.None);
+
+        Assert.Equal(new PeerInfo("192.168.1.10:53001", null), session.Peer);
+        Assert.Equal(session.Peer, seenDuringPeerConnected);
+    }
+
+    [Fact]
+    public async Task Should_ExposePeerWithEndpoint_When_ListenAsync_AcceptsAConnection()
+    {
+        var listener = Substitute.For<IPeerListener>();
+        var connection = CreatePendingConnection("10.0.0.5:61234");
+        listener.AcceptAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(connection));
+        var session = new ChatSession(listener, Substitute.For<IPeerConnector>(), "local");
+
+        await session.ListenAsync(ChatSession.DefaultPort, CancellationToken.None);
+
+        Assert.Equal(new PeerInfo("10.0.0.5:61234", null), session.Peer);
+    }
+
+    [Fact]
+    public async Task Should_SetPeerNameBeforeRaisingPeerIdentified_When_HandshakeArrives()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<string?>("NAME:Bob"), new TaskCompletionSource<string?>().Task);
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var identifiedTcs = new TaskCompletionSource<PeerInfo?>();
+        session.PeerIdentified += (_, _) => identifiedTcs.TrySetResult(session.Peer);
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        var seenDuringPeerIdentified = await identifiedTcs.Task
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new PeerInfo("peer", "Bob"), seenDuringPeerIdentified);
+        Assert.Equal(new PeerInfo("peer", "Bob"), session.Peer);
+    }
+
+    [Fact]
+    public async Task Should_ClearPeer_When_PeerEndsTheSession()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<string?>("NAME:Bob"), Task.FromResult<string?>(null));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var peerAtDisconnect = new TaskCompletionSource<PeerInfo?>();
+        session.Disconnected += (_, _) => peerAtDisconnect.TrySetResult(session.Peer);
+
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+        var seen = await peerAtDisconnect.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Cleared before Disconnected is raised, so a handler never sees a stale peer.
+        Assert.Null(seen);
+        Assert.Null(session.Peer);
+    }
+
+    [Fact]
+    public async Task Should_ClearPeer_When_Disconnect_Called()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        var receiveTcs = new TaskCompletionSource<string?>();
+        connection.ReceiveAsync(Arg.Any<CancellationToken>()).Returns(receiveTcs.Task);
+        connection.When(c => c.Dispose()).Do(_ => receiveTcs.TrySetResult(null));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var disconnectedTcs = new TaskCompletionSource();
+        session.Disconnected += (_, _) => disconnectedTcs.TrySetResult();
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+
+        session.Disconnect();
+        await disconnectedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Null(session.Peer);
+    }
+
+    [Fact]
+    public async Task Should_ClearPeer_When_SessionIsDisposed()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = CreatePendingConnection("peer");
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        await session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None);
+
+        session.Dispose();
+
+        Assert.Null(session.Peer);
+    }
+
+    [Fact]
+    public async Task Should_NotExposePeer_When_HandshakeSendFails()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var connection = Substitute.For<IPeerConnection>();
+        connection.RemoteEndPoint.Returns("peer");
+        connection.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new IOException("broken")));
+        connector.ConnectAsync(Arg.Any<IPAddress>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+
+        await Assert.ThrowsAsync<IOException>(
+            () => session.ConnectAsync(IPAddress.Loopback, 53000, CancellationToken.None));
+
+        Assert.Null(session.Peer);
+    }
+
+    [Fact]
+    public async Task Should_NotNameTheCurrentPeer_When_AnAbandonedConnectionsLoopReadsAHandshakeLate()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var abandoned = Substitute.For<IPeerConnection>();
+        abandoned.RemoteEndPoint.Returns("abandoned");
+        var abandonedReceive = new TaskCompletionSource<string?>();
+        abandoned.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(abandonedReceive.Task, Task.FromResult<string?>(null));
+        var current = CreatePendingConnection("current");
+        connector.ConnectAsync(IPAddress.Loopback, 53001, Arg.Any<CancellationToken>()).Returns(Task.FromResult(abandoned));
+        connector.ConnectAsync(IPAddress.Loopback, 53002, Arg.Any<CancellationToken>()).Returns(Task.FromResult(current));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var abandonedEnded = new TaskCompletionSource();
+        session.Disconnected += (_, _) => abandonedEnded.TrySetResult();
+        await session.ConnectAsync(IPAddress.Loopback, 53001, CancellationToken.None);
+
+        // Dispose releases the active connection at once while its receive loop is still
+        // waiting on the socket; ConnectAsync does not check for disposal, so a new peer can
+        // then be claimed before that old loop wakes up.
+        session.Dispose();
+        await session.ConnectAsync(IPAddress.Loopback, 53002, CancellationToken.None);
+        abandonedReceive.SetResult("NAME:Stale");
+        await abandonedEnded.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new PeerInfo("current", null), session.Peer);
+    }
+
+    [Fact]
+    public async Task Should_NotCarryTheEarlierPeersName_When_ALaterPeerNeverIdentifies()
+    {
+        var connector = Substitute.For<IPeerConnector>();
+        var first = Substitute.For<IPeerConnection>();
+        first.RemoteEndPoint.Returns("first");
+        first.ReceiveAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<string?>("NAME:Bob"), Task.FromResult<string?>(null));
+        var second = CreatePendingConnection("second");
+        connector.ConnectAsync(IPAddress.Loopback, 53001, Arg.Any<CancellationToken>()).Returns(Task.FromResult(first));
+        connector.ConnectAsync(IPAddress.Loopback, 53002, Arg.Any<CancellationToken>()).Returns(Task.FromResult(second));
+        var session = new ChatSession(Substitute.For<IPeerListener>(), connector, "local");
+        var firstEnded = new TaskCompletionSource();
+        session.Disconnected += (_, _) => firstEnded.TrySetResult();
+        await session.ConnectAsync(IPAddress.Loopback, 53001, CancellationToken.None);
+        await firstEnded.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        await session.ConnectAsync(IPAddress.Loopback, 53002, CancellationToken.None);
+
+        Assert.Equal(new PeerInfo("second", null), session.Peer);
+    }
+
     private static IPeerConnection CreatePendingConnection(string remoteEndPoint)
     {
         var connection = Substitute.For<IPeerConnection>();
