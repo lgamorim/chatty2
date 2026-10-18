@@ -16,6 +16,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
     private readonly Lock _gate = new();
     private IPeerConnection? _activeConnection;
     private IPEndPoint? _lastDialedEndpoint;
+    private IPeerConnection? _locallyClosedConnection;
     private CancellationTokenSource? _listenCts;
     private Task _previousListenAttempt = Task.CompletedTask;
     private bool _disposed;
@@ -53,7 +54,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
     public event EventHandler<MessageDroppedEventArgs>? MessageDropped;
 
-    public event EventHandler? Disconnected;
+    public event EventHandler<DisconnectedEventArgs>? Disconnected;
 
     public event EventHandler<ListenFailedEventArgs>? ListenFailed;
 
@@ -197,6 +198,9 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         lock (_gate)
         {
             connection = _activeConnection ?? throw new InvalidOperationException("Not connected to a peer.");
+            // Marked before closing so the receive loop, which ends as a result, can tell this
+            // apart from the peer leaving however the socket reacts to being closed here.
+            _locallyClosedConnection = connection;
         }
 
         connection.Dispose();
@@ -212,6 +216,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
         {
             cts = _listenCts;
             _listenCts = null;
+            _locallyClosedConnection = _activeConnection;
             _activeConnection?.Dispose();
             _activeConnection = null;
         }
@@ -314,6 +319,9 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
 
     private async Task ReceiveLoopAsync(IPeerConnection connection)
     {
+        string? peerName = null;
+        var reason = DisconnectReason.PeerClosed;
+
         try
         {
             var isFirstMessage = true;
@@ -336,6 +344,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                 }
                 catch (Exception)
                 {
+                    reason = DisconnectReason.ConnectionLost;
                     break;
                 }
 
@@ -346,6 +355,7 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
                     isFirstMessage = false;
                     if (TryParseHandshake(message, out var peerUserName))
                     {
+                        peerName = peerUserName;
                         PeerIdentified?.Invoke(this, new PeerIdentifiedEventArgs(peerUserName));
                         continue;
                     }
@@ -359,10 +369,16 @@ public sealed class ChatSession(IPeerListener listener, IPeerConnector connector
             lock (_gate)
             {
                 if (ReferenceEquals(_activeConnection, connection)) _activeConnection = null;
+
+                if (ReferenceEquals(_locallyClosedConnection, connection))
+                {
+                    _locallyClosedConnection = null;
+                    reason = DisconnectReason.LocalRequest;
+                }
             }
 
             connection.Dispose();
-            Disconnected?.Invoke(this, EventArgs.Empty);
+            Disconnected?.Invoke(this, new DisconnectedEventArgs(reason, peerName));
         }
     }
 }

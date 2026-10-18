@@ -317,7 +317,7 @@ public class ConsoleAppRunnerTests
 
         session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
         session.PeerConnected += Raise.EventWith(new PeerConnectedEventArgs("10.0.0.2:53000"));
-        session.Disconnected += Raise.Event<EventHandler>();
+        session.Disconnected += Raise.EventWith(new DisconnectedEventArgs(DisconnectReason.PeerClosed, null));
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
@@ -364,12 +364,50 @@ public class ConsoleAppRunnerTests
         var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
 
         session.PeerIdentified += Raise.EventWith(new PeerIdentifiedEventArgs("Bob"));
-        session.Disconnected += Raise.Event<EventHandler>();
+        session.Disconnected += Raise.EventWith(new DisconnectedEventArgs(DisconnectReason.PeerClosed, null));
         session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi again"));
 
         await runner.RunAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("[peer] hi again", output.ToString());
+    }
+
+    [Theory]
+    [InlineData(DisconnectReason.PeerClosed, "Bob", "Bob disconnected.")]
+    [InlineData(DisconnectReason.PeerClosed, null, "Peer disconnected.")]
+    [InlineData(DisconnectReason.ConnectionLost, "Bob", "Connection to Bob was lost.")]
+    [InlineData(DisconnectReason.ConnectionLost, null, "Connection to the peer was lost.")]
+    [InlineData(DisconnectReason.LocalRequest, "Bob", "Disconnected from Bob.")]
+    [InlineData(DisconnectReason.LocalRequest, null, "Disconnected from the peer.")]
+    public async Task Should_WriteNoticeForTheReason_When_DisconnectedEventRaised(
+        DisconnectReason reason, string? peerName, string expectedNotice)
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
+
+        session.Disconnected += Raise.EventWith(new DisconnectedEventArgs(reason, peerName));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains(expectedNotice, output.ToString());
+    }
+
+    [Theory]
+    [InlineData(DisconnectReason.PeerClosed)]
+    [InlineData(DisconnectReason.ConnectionLost)]
+    [InlineData(DisconnectReason.LocalRequest)]
+    public async Task Should_StartListeningAgain_When_DisconnectedForAnyReason(DisconnectReason reason)
+    {
+        var session = Substitute.For<IChatSession>();
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), new StringWriter(), new StringWriter());
+
+        session.Disconnected += Raise.EventWith(new DisconnectedEventArgs(reason, "Bob"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        // Once for the disconnect handled above, once for the initial listen RunAsync starts.
+        await session.Received(2).ListenAsync(ChatSession.DefaultPort, Arg.Any<CancellationToken>());
     }
 
     [Fact]

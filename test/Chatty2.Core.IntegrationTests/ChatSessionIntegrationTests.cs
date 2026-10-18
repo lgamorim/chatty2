@@ -68,6 +68,70 @@ public class ChatSessionIntegrationTests
     }
 
     [Fact]
+    public async Task Should_ReportLocalRequestToTheCaller_AndPeerClosedWithItsNameToTheOtherSide_When_OneSideDisconnects()
+    {
+        var port = GetFreeLoopbackPort();
+        using var server = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "server");
+        using var client = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "client");
+        var serverDisconnected = new TaskCompletionSource<DisconnectedEventArgs>();
+        var clientDisconnected = new TaskCompletionSource<DisconnectedEventArgs>();
+        var clientHasReadServerHandshake = new TaskCompletionSource();
+        server.Disconnected += (_, e) => serverDisconnected.TrySetResult(e);
+        client.Disconnected += (_, e) => clientDisconnected.TrySetResult(e);
+        client.PeerIdentified += (_, _) => clientHasReadServerHandshake.TrySetResult();
+
+        var listen = server.ListenAsync(port, CancellationToken.None);
+        await client.ConnectAsync(IPAddress.Loopback, port, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await listen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Closing a socket that still has unread inbound data makes the OS send a reset
+        // instead of an orderly FIN, which the server would (correctly) report as a lost
+        // connection. Wait until the client has consumed the server's handshake so nothing is
+        // left unread; without this the outcome depends on thread-pool timing, which differs
+        // between operating systems.
+        await clientHasReadServerHandshake.Task
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        client.Disconnect();
+        var clientSide = await clientDisconnected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var serverSide = await serverDisconnected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(DisconnectReason.LocalRequest, clientSide.Reason);
+        // The client's name line precedes its end of stream on the wire, so the server has
+        // always read it by the time the stream ends.
+        Assert.Equal(DisconnectReason.PeerClosed, serverSide.Reason);
+        Assert.Equal("client", serverSide.PeerName);
+    }
+
+    [Fact]
+    public async Task Should_ReportConnectionLost_When_TheRemoteResetsTheConnection()
+    {
+        var port = GetFreeLoopbackPort();
+        using var session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "local");
+        var connected = new TaskCompletionSource();
+        var disconnected = new TaskCompletionSource<DisconnectedEventArgs>();
+        session.PeerConnected += (_, _) => connected.TrySetResult();
+        session.Disconnected += (_, e) => disconnected.TrySetResult(e);
+
+        _ = session.ListenAsync(port, CancellationToken.None);
+        using var rawSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await rawSocket.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        await connected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // A zero linger timeout makes closing send a reset instead of an orderly FIN, which
+        // is how a crashed peer or a dropped link looks to the session. A plain Socket is used
+        // because TcpClient.Dispose shuts the connection down first, so the peer would see a
+        // FIN and then the reset; Linux reports a clean end of stream for that order, which
+        // is not the abrupt loss this test is about.
+        rawSocket.LingerState = new LingerOption(true, 0);
+        rawSocket.Dispose();
+        var args = await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(DisconnectReason.ConnectionLost, args.Reason);
+    }
+
+    [Fact]
     public async Task Should_DropOversizedLineAndKeepTheSessionUp_When_PeerSendsOne()
     {
         var port = GetFreeLoopbackPort();
