@@ -83,7 +83,7 @@ public class BoundedLineReaderTests
     }
 
     [Fact]
-    public async Task Should_ThrowMessageTooLong_AndResumeAtTheNextLine_When_LineExceedsTheLimit()
+    public async Task Should_ThrowMessageTooLongAndResumeAtTheNextLine_When_LineExceedsTheLimit()
     {
         var reader = new BoundedLineReader(new StringReader(new string('x', 11) + "\nnext\n"), 10);
 
@@ -95,7 +95,7 @@ public class BoundedLineReaderTests
     }
 
     [Fact]
-    public async Task Should_ThrowOnce_AndResumeAtTheNextLine_When_OversizedLineSpansManyBufferRefills()
+    public async Task Should_ThrowOnceAndResumeAtTheNextLine_When_OversizedLineSpansManyBufferRefills()
     {
         var reader = new BoundedLineReader(new StringReader(new string('x', 10_000) + "\r\nnext\n"), 4096);
 
