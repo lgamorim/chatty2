@@ -185,9 +185,10 @@ still cannot grow memory past the limit, but the discard simply waits for one; t
   (`DisconnectedEventArgs`: a `DisconnectReason` and the peer's name, `null` if it never
   identified itself), so the console can print `Bob disconnected.` (the peer ended the stream
   cleanly), `Connection to Bob was lost.` (reading failed, e.g. a reset) or
-  `Disconnected from Bob.` (this side ran `/disconnect` or exited). A `/disconnect` or `Dispose` marks the connection
-  under the same `_gate` lock before closing it, and the receive loop reports that as the local
-  reason however the socket reacts to being closed. This uses only what TCP already tells us, so
+  `Disconnected from Bob.` (this side ran `/disconnect`). A `/disconnect` or `Dispose` marks the
+  connection under the same `_gate` lock before closing it, and the receive loop reports that as
+  the local reason however the socket reacts to being closed. On exit the runner unsubscribes
+  before disposing the session, so nothing is printed then. This uses only what TCP already tells us, so
   the wire protocol is unchanged and older peers are unaffected. The limit is that it cannot tell
   a peer that quit on purpose from one that crashed but still sent an orderly end of stream; both
   read as "disconnected". A peer that closes while the other side's handshake line is still
