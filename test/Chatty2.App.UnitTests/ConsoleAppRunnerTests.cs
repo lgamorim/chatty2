@@ -387,6 +387,44 @@ public class ConsoleAppRunnerTests
     }
 
     [Fact]
+    public async Task Should_WriteNoticeNamingThePeerAndTheLimit_When_MessageDroppedEventRaised()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter());
+
+        session.PeerIdentified += Raise.EventWith(new PeerIdentifiedEventArgs("Bob"));
+        session.MessageDropped += Raise.EventWith(new MessageDroppedEventArgs(4096));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        var text = output.ToString();
+        Assert.Contains("Dropped an oversized message", text);
+        Assert.Contains("Bob", text);
+        Assert.Contains("4096", text);
+    }
+
+    [Fact]
+    public async Task Should_ExplainTheLimitAndContinue_When_SendAsyncThrowsMessageTooLong()
+    {
+        var session = Substitute.For<IChatSession>();
+        session.IsConnected.Returns(true);
+        session.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new MessageTooLongException(4096)));
+        var output = new StringWriter();
+        var input = new StringReader("a very long line\n/exit\n");
+        var runner = new ConsoleAppRunner([new ExitCommand()], session, ChatSession.DefaultPort, input, output, new StringWriter());
+
+        var exitCode = await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        var text = output.ToString();
+        Assert.Equal(0, exitCode);
+        Assert.Contains("too long", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("4096", text);
+        Assert.DoesNotContain("may have disconnected", text);
+    }
+
+    [Fact]
     public async Task Should_ContinueLoop_When_SendAsyncThrowsMidLoop()
     {
         var session = Substitute.For<IChatSession>();

@@ -67,6 +67,34 @@ public class ChatSessionIntegrationTests
         Assert.True(server.IsConnected);
     }
 
+    [Fact]
+    public async Task Should_DropOversizedLineAndKeepTheSessionUp_When_PeerSendsOne()
+    {
+        var port = GetFreeLoopbackPort();
+        using var session = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "local");
+        var dropped = new TaskCompletionSource<MessageDroppedEventArgs>();
+        var received = new TaskCompletionSource<string>();
+        session.MessageDropped += (_, e) => dropped.TrySetResult(e);
+        session.MessageReceived += (_, e) => received.TrySetResult(e.Message);
+
+        var listen = session.ListenAsync(port, CancellationToken.None);
+
+        // A bare TcpPeerConnection is a peer that skips the sender-side guard, as an older
+        // or hostile client would.
+        using var rawPeer = await new TcpPeerConnector().ConnectAsync(IPAddress.Loopback, port, CancellationToken.None);
+        await listen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await rawPeer.SendAsync("NAME:Raw", CancellationToken.None);
+        await rawPeer.SendAsync(new string('x', ChatSession.MaxMessageLength * 3), CancellationToken.None);
+        await rawPeer.SendAsync("still here", CancellationToken.None);
+
+        var notice = await dropped.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var message = await received.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ChatSession.MaxMessageLength, notice.MaxLength);
+        Assert.Equal("still here", message);
+        Assert.True(session.IsConnected);
+    }
+
     private static int GetFreeLoopbackPort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

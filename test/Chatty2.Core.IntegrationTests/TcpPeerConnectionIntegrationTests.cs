@@ -127,6 +127,51 @@ public class TcpPeerConnectionIntegrationTests
         Assert.Equal(messages, receivedMessages);
     }
 
+    [Fact]
+    public async Task Should_ThrowMessageTooLongAndThenDeliverTheNextLine_When_RemoteSendsAnOversizedLine()
+    {
+        var port = GetFreeLoopbackPort();
+        var listener = new TcpPeerListener();
+        var connector = new TcpPeerConnector();
+
+        var acceptTask = listener.AcceptAsync(port, CancellationToken.None);
+        using var clientConnection = await connector.ConnectAsync(IPAddress.Loopback, port, CancellationToken.None);
+        using var serverConnection = await acceptTask;
+
+        // TcpPeerConnection itself does not guard sends (ChatSession does), so it can stand
+        // in for a non-conforming peer here.
+        await clientConnection.SendAsync(new string('x', ChatSession.MaxMessageLength + 1), CancellationToken.None);
+        await clientConnection.SendAsync("after", CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<MessageTooLongException>(
+            () => serverConnection.ReceiveAsync(CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        var next = await serverConnection.ReceiveAsync(CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ChatSession.MaxMessageLength, exception.MaxLength);
+        Assert.Equal("after", next);
+    }
+
+    [Fact]
+    public async Task Should_DeliverLine_When_ItIsExactlyTheMaximumLength()
+    {
+        var port = GetFreeLoopbackPort();
+        var listener = new TcpPeerListener();
+        var connector = new TcpPeerConnector();
+
+        var acceptTask = listener.AcceptAsync(port, CancellationToken.None);
+        using var clientConnection = await connector.ConnectAsync(IPAddress.Loopback, port, CancellationToken.None);
+        using var serverConnection = await acceptTask;
+        var atLimit = new string('x', ChatSession.MaxMessageLength);
+
+        await clientConnection.SendAsync(atLimit, CancellationToken.None);
+        var received = await serverConnection.ReceiveAsync(CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(atLimit, received);
+    }
+
     private static int GetFreeLoopbackPort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

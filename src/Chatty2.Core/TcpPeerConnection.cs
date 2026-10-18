@@ -12,6 +12,7 @@ public sealed class TcpPeerConnection : IPeerConnection
 
     private readonly TcpClient _client;
     private readonly StreamReader _reader;
+    private readonly BoundedLineReader _lineReader;
     private readonly StreamWriter _writer;
     private bool _disposed;
 
@@ -22,6 +23,7 @@ public sealed class TcpPeerConnection : IPeerConnection
         _client = client;
         var stream = client.GetStream();
         _reader = new StreamReader(stream, Utf8WithoutBom);
+        _lineReader = new BoundedLineReader(_reader, ChatSession.MaxMessageLength);
         _writer = new StreamWriter(stream, Utf8WithoutBom) { AutoFlush = true };
         RemoteEndPoint = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
     }
@@ -35,7 +37,7 @@ public sealed class TcpPeerConnection : IPeerConnection
 
     public Task<string?> ReceiveAsync(CancellationToken cancellationToken)
     {
-        return _reader.ReadLineAsync(cancellationToken).AsTask();
+        return _lineReader.ReadLineAsync(cancellationToken);
     }
 
     public void Dispose()

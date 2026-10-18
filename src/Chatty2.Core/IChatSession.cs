@@ -19,6 +19,12 @@ public interface IChatSession : IDisposable
 
     event EventHandler<PeerIdentifiedEventArgs>? PeerIdentified;
 
+    /// <summary>
+    /// The peer sent a line longer than <see cref="ChatSession.MaxMessageLength"/>. The line was
+    /// discarded and the session carries on.
+    /// </summary>
+    event EventHandler<MessageDroppedEventArgs>? MessageDropped;
+
     event EventHandler? Disconnected;
 
     event EventHandler<ListenFailedEventArgs>? ListenFailed;

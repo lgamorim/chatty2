@@ -69,6 +69,11 @@ line break.
 Each incoming message is also prefixed with the local time it arrived,
 e.g. `[14:30:05] [Alice] hello`.
 
+A chat message is limited to 4096 characters. Typing a longer line is refused locally with a
+"too long" message and nothing is sent. If a peer sends a longer line anyway (an older version
+has no limit), it is discarded and you get a notice naming the peer; the session stays open and
+the lines after it arrive normally.
+
 ### Commands
 
 | Command | Description |
@@ -138,6 +143,17 @@ stream ended cleanly; `TcpPeerConnection.Dispose()` explicitly shuts down only t
 (`SocketShutdown.Send`) before closing, so the remote side observes a clean end-of-stream instead
 of an abortive "connection reset" — shutting down both directions was tried first and produced
 the abortive RST behavior instead, which is why only the send side is shut down.
+
+Incoming lines are not read with `StreamReader.ReadLineAsync` directly, because that has no length
+limit and a peer could make the app buffer an unbounded amount of text. `TcpPeerConnection` reads
+through `BoundedLineReader`, which keeps the same `\r`, `\n` and `\r\n` line breaks but holds at
+most `ChatSession.MaxMessageLength` (4096) characters of any one line. A longer line is discarded
+up to its line break and reported by throwing `MessageTooLongException`; the stream is then
+positioned at the next line, so `ChatSession` raises `MessageDropped` and keeps receiving instead of
+ending the session. The limit is counted in UTF-16 characters of the decoded line, the same unit
+used for the sender-side check in `ChatSession.SendAsync`. A peer that never sends a line break
+still cannot grow memory past the limit, but the discard simply waits for one; there is no timeout
+(see the limitations below).
 
 ### Connection lifecycle and the listen/connect race
 
@@ -221,6 +237,8 @@ state.
 
 - Single active peer connection only; no group chat / multiple simultaneous peers.
 - No guard against connecting to your own machine's IP/loopback (undefined but harmless).
+- No read timeout or heartbeat: a connected peer that goes silent (or never finishes a line) holds
+  the single connection slot until it disconnects or you run `/disconnect`.
 - The listening port is configurable at startup (`--port`/`-p`); there's no in-app command to
   change it once the app is running.
 

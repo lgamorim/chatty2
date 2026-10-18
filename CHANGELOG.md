@@ -13,6 +13,12 @@ the wire protocol.
 - `/redial` reconnects to the peer last reached with `/connect`, so a dropped session doesn't
   mean retyping the address. Peers that dialed in are not remembered.
 
+### Changed
+
+- Chat messages are limited to 4096 characters. Typing a longer line is refused locally with a
+  "too long" message. A longer line received from a peer (for example from an older version,
+  which has no limit) is discarded with a notice and the session stays open.
+
 ## [0.1.0] - 2026-08-11
 
 Initial alpha release.
