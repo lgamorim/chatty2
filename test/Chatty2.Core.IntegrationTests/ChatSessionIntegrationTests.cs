@@ -75,13 +75,23 @@ public class ChatSessionIntegrationTests
         using var client = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "client");
         var serverDisconnected = new TaskCompletionSource<DisconnectedEventArgs>();
         var clientDisconnected = new TaskCompletionSource<DisconnectedEventArgs>();
+        var clientHasReadServerHandshake = new TaskCompletionSource();
         server.Disconnected += (_, e) => serverDisconnected.TrySetResult(e);
         client.Disconnected += (_, e) => clientDisconnected.TrySetResult(e);
+        client.PeerIdentified += (_, _) => clientHasReadServerHandshake.TrySetResult();
 
         var listen = server.ListenAsync(port, CancellationToken.None);
         await client.ConnectAsync(IPAddress.Loopback, port, CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         await listen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Closing a socket that still has unread inbound data makes the OS send a reset
+        // instead of an orderly FIN, which the server would (correctly) report as a lost
+        // connection. Wait until the client has consumed the server's handshake so nothing is
+        // left unread; without this the outcome depends on thread-pool timing, which differs
+        // between operating systems.
+        await clientHasReadServerHandshake.Task
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         client.Disconnect();
         var clientSide = await clientDisconnected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
