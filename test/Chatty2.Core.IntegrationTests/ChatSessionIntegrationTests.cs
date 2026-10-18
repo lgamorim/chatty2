@@ -132,7 +132,7 @@ public class ChatSessionIntegrationTests
     }
 
     [Fact]
-    public async Task Should_ExposeEachSidesPeerWithItsName_AndClearItAfterTheSessionEnds()
+    public async Task Should_ExposeEachSidesNamedPeerThenClearIt_When_BothHandshakesCompleteAndTheSessionEnds()
     {
         var port = GetFreeLoopbackPort();
         using var server = new ChatSession(new TcpPeerListener(), new TcpPeerConnector(), "server");
