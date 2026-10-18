@@ -192,7 +192,8 @@ still cannot grow memory past the limit, but the discard simply waits for one; t
   the wire protocol is unchanged and older peers are unaffected. The limit is that it cannot tell
   a peer that quit on purpose from one that crashed but still sent an orderly end of stream; both
   read as "disconnected". A peer that closes while the other side's handshake line is still
-  unread produces a reset, which reads as "lost".
+  unread can produce a reset. Whether that reads as "lost" or as an orderly close depends on the
+  platform's TCP stack, which can report a clean end of stream when a reset follows a FIN.
 - `ListenAsync` is always invoked fire-and-forget by its callers, so any exception that escaped
   it (e.g. a `SocketException` from `TcpListener.Start()` because the port is already in use)
   would otherwise go unobserved — listening would die silently with no feedback. `ListenAsync`

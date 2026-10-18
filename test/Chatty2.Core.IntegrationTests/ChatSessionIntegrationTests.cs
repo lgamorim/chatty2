@@ -115,14 +115,17 @@ public class ChatSessionIntegrationTests
         session.Disconnected += (_, e) => disconnected.TrySetResult(e);
 
         _ = session.ListenAsync(port, CancellationToken.None);
-        using var rawClient = new TcpClient();
-        await rawClient.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        using var rawSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await rawSocket.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
         await connected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         // A zero linger timeout makes closing send a reset instead of an orderly FIN, which
-        // is how a crashed peer or a dropped link looks to the session.
-        rawClient.LingerState = new LingerOption(true, 0);
-        rawClient.Dispose();
+        // is how a crashed peer or a dropped link looks to the session. A plain Socket is used
+        // because TcpClient.Dispose shuts the connection down first, so the peer would see a
+        // FIN and then the reset; Linux reports a clean end of stream for that order, which
+        // is not the abrupt loss this test is about.
+        rawSocket.LingerState = new LingerOption(true, 0);
+        rawSocket.Dispose();
         var args = await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.Equal(DisconnectReason.ConnectionLost, args.Reason);
