@@ -24,7 +24,7 @@
       released version and is bumped in the PR that cuts a release, together
       with CHANGELOG.md.
     -->
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
 
     <!--
       IDE0005 (remove unnecessary usings) only runs at build time when a
