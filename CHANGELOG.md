@@ -10,6 +10,8 @@ the wire protocol.
 
 ### Added
 
+- `--log <path>` appends a timestamped record of the conversation (messages in both directions
+  plus connect and disconnect notices) to a file. It is off by default; the file is plain text.
 - `/status` shows your display name, the port you were started listening on, and who you are
   connected to (name and address), or that you are not connected.
 - `/redial` reconnects to the peer last reached with `/connect`, so a dropped session doesn't

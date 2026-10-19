@@ -3,6 +3,7 @@ using Chatty2.Core;
 
 var listeningPort = ChatSession.DefaultPort;
 var userName = Environment.UserName;
+string? logPath = null;
 
 for (var i = 0; i < args.Length; i += 2)
 {
@@ -17,6 +18,10 @@ for (var i = 0; i < args.Length; i += 2)
         case "--name" or "-n":
             if (string.IsNullOrWhiteSpace(args[i + 1])) return PrintUsageAndExit();
             userName = args[i + 1];
+            break;
+        case "--log":
+            if (string.IsNullOrWhiteSpace(args[i + 1])) return PrintUsageAndExit();
+            logPath = args[i + 1];
             break;
         default:
             return PrintUsageAndExit();
@@ -40,6 +45,25 @@ catch (ArgumentException exception)
 
 using (session)
 {
+    ChatLog? chatLog = null;
+    if (logPath is not null)
+    {
+        try
+        {
+            // Opened for append (created if missing) and readable by others while it is open,
+            // so the file can be followed with tail -f. A missing directory is an error here
+            // rather than something to create behind the user's back.
+            chatLog = new ChatLog(File.AppendText(logPath), userName, TimeProvider.System);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"Could not open the log file '{logPath}': {exception.Message}");
+            return PrintUsageAndExit();
+        }
+    }
+
+    using var log = chatLog;
+
     ICommand[] commands =
     [
         new ConnectCommand(session, listeningPort),
@@ -50,13 +74,14 @@ using (session)
         new ExitCommand()
     ];
 
-    var runner = new ConsoleAppRunner(commands, session, listeningPort, Console.In, Console.Out, Console.Error);
+    var runner = new ConsoleAppRunner(
+        commands, session, listeningPort, Console.In, Console.Out, Console.Error, chatLog: chatLog);
 
     return await runner.RunAsync(CancellationToken.None);
 }
 
 static int PrintUsageAndExit()
 {
-    Console.Error.WriteLine("Usage: Chatty2.App [--port <port>] [--name <name>]");
+    Console.Error.WriteLine("Usage: Chatty2.App [--port <port>] [--name <name>] [--log <path>]");
     return 1;
 }
