@@ -243,8 +243,11 @@ public sealed class ConsoleAppRunner
 
     private void Log(Action<ChatLog> write)
     {
-        // Under the output lock so log lines are written one at a time and in the same order
-        // as the screen, whichever thread raised the event.
+        // Under the output lock so events raised on different threads cannot interleave their
+        // writes to the log or race on _chatLog. That is all it promises: an event's screen
+        // write and its log write take the lock separately, so two events can land in the
+        // file in a different order than on screen, and sent messages are logged without ever
+        // being shown.
         lock (_outputLock)
         {
             if (_chatLog is not { } log) return;

@@ -271,9 +271,12 @@ sleeps or background threads required to exercise the "received a message while 
 it, because it is the one place that sees both directions: `ChatSession` raises an event for each
 incoming message but has none for the messages the user sends. Every log write goes through one
 helper that takes the same lock as the console writes, so lines reach the file one at a time and
-in the order they appear on screen, and that helper is also where a failing writer is handled
-(report once, stop logging, keep chatting). The text of each notice is built once and used for
-both the screen and the log, so the two cannot drift apart. `Program.cs` only opens the file;
+never interleave, and that helper is also where a failing writer is handled (report once, stop
+logging, keep chatting). It does not promise that the file's order matches the screen's: an
+event's screen write and its log write take the lock separately, so two events on different
+threads can swap places in the file, and the messages you send are logged without ever being
+shown. The text of each notice is built once and used for both the screen and the log, so the
+two cannot drift apart. `Program.cs` only opens the file;
 it is the one untested seam, covered by running the app.
 
 ### One output lock for all console writes, color-coded by severity
