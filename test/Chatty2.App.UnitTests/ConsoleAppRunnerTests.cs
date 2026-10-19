@@ -708,13 +708,16 @@ public class ConsoleAppRunnerTests
         Assert.Empty(LogLines(logWriter));
     }
 
-    [Fact]
-    public async Task Should_ReportOnceStopLoggingAndKeepChatting_When_TheLogCannotBeWritten()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Should_ReportOnceStopLoggingAndKeepChatting_When_TheLogCannotBeWritten(bool writerIsAlreadyDisposed)
     {
         var session = Substitute.For<IChatSession>();
         session.IsConnected.Returns(true);
         var output = new StringWriter();
-        var failingWriter = new FailingLogWriter();
+        Exception failure = writerIsAlreadyDisposed ? new ObjectDisposedException("log file") : new IOException("disk full");
+        var failingWriter = new FailingLogWriter(failure);
         var runner = new ConsoleAppRunner(
             [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("one\ntwo\n/exit\n"), output, new StringWriter(),
             chatLog: new ChatLog(failingWriter, "Alice", new FixedTimeProvider(FixedInstant)));
@@ -725,7 +728,7 @@ public class ConsoleAppRunnerTests
         await session.Received(1).SendAsync("one", Arg.Any<CancellationToken>());
         await session.Received(1).SendAsync("two", Arg.Any<CancellationToken>());
         Assert.Equal(1, output.ToString().Split("Could not write to the chat log").Length - 1);
-        Assert.Contains("disk full", output.ToString());
+        Assert.Contains(failure.Message, output.ToString());
         Assert.Equal(1, failingWriter.WriteAttempts);
     }
 
@@ -748,7 +751,7 @@ public class ConsoleAppRunnerTests
     private static string[] LogLines(StringWriter writer) =>
         writer.ToString().Split(writer.NewLine, StringSplitOptions.RemoveEmptyEntries);
 
-    private sealed class FailingLogWriter : TextWriter
+    private sealed class FailingLogWriter(Exception failure) : TextWriter
     {
         public int WriteAttempts { get; private set; }
 
@@ -757,7 +760,7 @@ public class ConsoleAppRunnerTests
         public override void WriteLine(string? value)
         {
             WriteAttempts++;
-            throw new IOException("disk full");
+            throw failure;
         }
     }
 
