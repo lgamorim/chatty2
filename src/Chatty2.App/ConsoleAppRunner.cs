@@ -16,6 +16,7 @@ public sealed class ConsoleAppRunner
     private readonly Func<bool> _isInputRedirected;
     private readonly TimeProvider _timeProvider;
     private readonly Lock _outputLock = new();
+    private ChatLog? _chatLog;
     private CancellationToken _cancellationToken;
     private bool _promptPending;
     private string _peerName = "peer";
@@ -28,7 +29,8 @@ public sealed class ConsoleAppRunner
         TextWriter output,
         TextWriter error,
         Func<bool>? isInputRedirected = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ChatLog? chatLog = null)
     {
         _commands = commands.ToDictionary(command => command.Name, StringComparer.OrdinalIgnoreCase);
         _session = session;
@@ -38,6 +40,7 @@ public sealed class ConsoleAppRunner
         _error = error;
         _isInputRedirected = isInputRedirected ?? (() => Console.IsInputRedirected);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _chatLog = chatLog;
 
         _session.MessageReceived += OnMessageReceived;
         _session.PeerConnected += OnPeerConnected;
@@ -148,11 +151,15 @@ public sealed class ConsoleAppRunner
         catch (MessageTooLongException exception)
         {
             WriteError($"Message not sent: it is too long (the limit is {exception.MaxLength} characters).");
+            return;
         }
         catch (Exception)
         {
             WriteError("Message could not be sent. The peer may have disconnected.");
+            return;
         }
+
+        Log(log => log.Sent(message));
     }
 
     private void OnMessageReceived(object? sender, ChatMessageReceivedEventArgs e)
@@ -165,6 +172,7 @@ public sealed class ConsoleAppRunner
 
         var timestamp = _timeProvider.GetLocalNow().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
         WriteInfo($"[{timestamp}] [{peerName}] {e.Message}");
+        Log(log => log.Received(peerName, e.Message));
     }
 
     private void OnMessageDropped(object? sender, MessageDroppedEventArgs e)
@@ -175,10 +183,17 @@ public sealed class ConsoleAppRunner
             peerName = _peerName;
         }
 
-        WriteError($"Dropped an oversized message from {peerName}: the limit is {e.MaxLength} characters.");
+        var notice = $"Dropped an oversized message from {peerName}: the limit is {e.MaxLength} characters.";
+        WriteError(notice);
+        Log(log => log.Event(notice));
     }
 
-    private void OnPeerConnected(object? sender, PeerConnectedEventArgs e) => WriteInfo($"Connected to {e.RemoteEndPoint}.");
+    private void OnPeerConnected(object? sender, PeerConnectedEventArgs e)
+    {
+        var notice = $"Connected to {e.RemoteEndPoint}.";
+        WriteInfo(notice);
+        Log(log => log.Event(notice));
+    }
 
     private void OnPeerIdentified(object? sender, PeerIdentifiedEventArgs e)
     {
@@ -196,18 +211,24 @@ public sealed class ConsoleAppRunner
     {
         // The name comes from the event, not _peerName: it belongs to the connection that
         // just ended, whereas _peerName may already have been replaced by a newer one.
+        string notice;
         switch (e.Reason)
         {
             case DisconnectReason.LocalRequest:
-                WriteInfo($"Disconnected from {e.PeerName ?? "the peer"}.");
+                notice = $"Disconnected from {e.PeerName ?? "the peer"}.";
+                WriteInfo(notice);
                 break;
             case DisconnectReason.ConnectionLost:
-                WriteError($"Connection to {e.PeerName ?? "the peer"} was lost.");
+                notice = $"Connection to {e.PeerName ?? "the peer"} was lost.";
+                WriteError(notice);
                 break;
             default:
-                WriteInfo($"{e.PeerName ?? "Peer"} disconnected.");
+                notice = $"{e.PeerName ?? "Peer"} disconnected.";
+                WriteInfo(notice);
                 break;
         }
+
+        Log(log => log.Event(notice));
 
         lock (_outputLock)
         {
@@ -219,6 +240,28 @@ public sealed class ConsoleAppRunner
 
     private void OnListenFailed(object? sender, ListenFailedEventArgs e) =>
         WriteError($"Stopped listening for incoming connections: {e.Exception.Message}");
+
+    private void Log(Action<ChatLog> write)
+    {
+        // Under the output lock so log lines are written one at a time and in the same order
+        // as the screen, whichever thread raised the event.
+        lock (_outputLock)
+        {
+            if (_chatLog is not { } log) return;
+
+            try
+            {
+                write(log);
+            }
+            catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+            {
+                // A broken log must not take the chat down with it: say so once, then stop
+                // trying so the same failure is not reported for every later message.
+                _chatLog = null;
+                WriteError($"Could not write to the chat log ({exception.Message}). Logging is off for the rest of this session; the chat continues.");
+            }
+        }
+    }
 
     private void WritePrompt()
     {

@@ -76,6 +76,34 @@ A chat message is limited to 4096 characters. Typing a longer line is refused lo
 has no limit), it is discarded and you get a notice naming the peer; the session stays open and
 the lines after it arrive normally.
 
+To keep a record of your conversations, pass `--log` with a file path (there is no short form):
+
+```
+dotnet run --project src/Chatty2.App -- --log chat.log
+```
+
+Logging is off unless you ask for it. The file is appended to (and created if it does not exist),
+so it keeps growing across runs; the parent directory must already exist. Each line carries the
+local time with its UTC offset, because the file can span days and time zones:
+
+```
+2026-10-19T01:06:59+01:00 * Connected to 127.0.0.1:56513.
+2026-10-19T01:06:59+01:00 [Raw] hi from raw
+2026-10-19T01:07:08+01:00 [Alice] hello from Alice
+2026-10-19T01:07:08+01:00 * Raw disconnected.
+```
+
+Messages in both directions are logged (yours under your own display name), along with the same
+connect, disconnect and dropped-message notices the console prints, marked with `*`. Command
+output, errors and the prompt are not. A path that cannot be opened prints the reason, then the
+usage message, and exits with code 1 before anything starts listening. If writing fails later
+(a full disk, say), you get one error, logging stops for the rest of the session and the chat
+carries on.
+
+The log is plain text on your disk with no rotation or encryption: anything said in the chat
+ends up in it, so treat the file accordingly. It is held open for appending while the app runs,
+which stops a second instance from opening the same file; give each instance its own.
+
 ### Commands
 
 | Command | Description |
@@ -235,6 +263,18 @@ formatted output. This is also why those event subscriptions happen in `ConsoleA
 constructor rather than in `RunAsync`: it means a test can construct the runner, raise an event
 synchronously (via NSubstitute), and only then call `RunAsync` — fully deterministic, with no
 sleeps or background threads required to exercise the "received a message while idle" path.
+
+### The chat log is written from the runner, under the output lock
+
+`ChatLog` (in `Chatty2.App`) turns a message or event into one timestamped, flushed line on a
+`TextWriter` and knows nothing about the console or the network. `ConsoleAppRunner` is what feeds
+it, because it is the one place that sees both directions: `ChatSession` raises an event for each
+incoming message but has none for the messages the user sends. Every log write goes through one
+helper that takes the same lock as the console writes, so lines reach the file one at a time and
+in the order they appear on screen, and that helper is also where a failing writer is handled
+(report once, stop logging, keep chatting). The text of each notice is built once and used for
+both the screen and the log, so the two cannot drift apart. `Program.cs` only opens the file;
+it is the one untested seam, covered by running the app.
 
 ### One output lock for all console writes, color-coded by severity
 

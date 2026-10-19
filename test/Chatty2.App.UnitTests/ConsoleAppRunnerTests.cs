@@ -573,19 +573,198 @@ public class ConsoleAppRunnerTests
         Assert.Contains("broken pipe", error.ToString());
     }
 
+    [Fact]
+    public async Task Should_LogTheMessage_When_SendSucceeds()
+    {
+        var session = Substitute.For<IChatSession>();
+        session.IsConnected.Returns(true);
+        var logWriter = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("hello there\n/exit\n"), new StringWriter(), new StringWriter(),
+            chatLog: NewLog(logWriter));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(["2026-08-04T14:30:05+00:00 [Alice] hello there"], LogLines(logWriter));
+    }
+
+    [Fact]
+    public async Task Should_NotLogTheMessage_When_SendFails()
+    {
+        var session = Substitute.For<IChatSession>();
+        session.IsConnected.Returns(true);
+        session.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new IOException("broken")));
+        var logWriter = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("hello there\n/exit\n"), new StringWriter(), new StringWriter(),
+            chatLog: NewLog(logWriter));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(LogLines(logWriter));
+    }
+
+    [Fact]
+    public async Task Should_NotLogTheMessage_When_NotConnected()
+    {
+        var session = Substitute.For<IChatSession>();
+        var logWriter = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("hello there\n/exit\n"), new StringWriter(), new StringWriter(),
+            chatLog: NewLog(logWriter));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(LogLines(logWriter));
+    }
+
+    [Fact]
+    public async Task Should_LogReceivedMessageLabelledWithThePeerName_When_MessageReceived()
+    {
+        var session = Substitute.For<IChatSession>();
+        var logWriter = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), new StringWriter(), new StringWriter(),
+            chatLog: NewLog(logWriter));
+
+        session.PeerIdentified += Raise.EventWith(new PeerIdentifiedEventArgs("Bob"));
+        session.MessageReceived += Raise.EventWith(new ChatMessageReceivedEventArgs("hi there"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(["2026-08-04T14:30:05+00:00 [Bob] hi there"], LogLines(logWriter));
+    }
+
+    [Fact]
+    public async Task Should_LogTheConnectionAsAnEvent_When_PeerConnectedEventRaised()
+    {
+        var session = Substitute.For<IChatSession>();
+        var logWriter = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), new StringWriter(), new StringWriter(),
+            chatLog: NewLog(logWriter));
+
+        session.PeerConnected += Raise.EventWith(new PeerConnectedEventArgs("10.0.0.2:53000"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(["2026-08-04T14:30:05+00:00 * Connected to 10.0.0.2:53000."], LogLines(logWriter));
+    }
+
+    [Theory]
+    [InlineData(DisconnectReason.PeerClosed, "Bob disconnected.")]
+    [InlineData(DisconnectReason.ConnectionLost, "Connection to Bob was lost.")]
+    [InlineData(DisconnectReason.LocalRequest, "Disconnected from Bob.")]
+    public async Task Should_LogTheSameNoticeAsTheConsole_When_DisconnectedEventRaised(DisconnectReason reason, string expectedNotice)
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var logWriter = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), output, new StringWriter(),
+            chatLog: NewLog(logWriter));
+
+        session.Disconnected += Raise.EventWith(new DisconnectedEventArgs(reason, "Bob"));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal([$"2026-08-04T14:30:05+00:00 * {expectedNotice}"], LogLines(logWriter));
+        Assert.Contains(expectedNotice, output.ToString());
+    }
+
+    [Fact]
+    public async Task Should_LogTheDroppedMessageNotice_When_MessageDroppedEventRaised()
+    {
+        var session = Substitute.For<IChatSession>();
+        var logWriter = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/exit\n"), new StringWriter(), new StringWriter(),
+            chatLog: NewLog(logWriter));
+
+        session.PeerIdentified += Raise.EventWith(new PeerIdentifiedEventArgs("Bob"));
+        session.MessageDropped += Raise.EventWith(new MessageDroppedEventArgs(4096));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            ["2026-08-04T14:30:05+00:00 * Dropped an oversized message from Bob: the limit is 4096 characters."],
+            LogLines(logWriter));
+    }
+
+    [Fact]
+    public async Task Should_NotLogCommandOutputOrErrors_When_CommandsAreRun()
+    {
+        var session = Substitute.For<IChatSession>();
+        var output = new StringWriter();
+        var logWriter = new StringWriter();
+        var runner = new ConsoleAppRunner(
+            [new HelpCommand(), new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("/help\n/nonsense\n/exit\n"), output, new StringWriter(),
+            chatLog: NewLog(logWriter));
+
+        await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("Available commands", output.ToString());
+        Assert.Contains("Unknown command", output.ToString());
+        Assert.Empty(LogLines(logWriter));
+    }
+
+    [Fact]
+    public async Task Should_ReportOnceStopLoggingAndKeepChatting_When_TheLogCannotBeWritten()
+    {
+        var session = Substitute.For<IChatSession>();
+        session.IsConnected.Returns(true);
+        var output = new StringWriter();
+        var failingWriter = new FailingLogWriter();
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("one\ntwo\n/exit\n"), output, new StringWriter(),
+            chatLog: new ChatLog(failingWriter, "Alice", new FixedTimeProvider(FixedInstant)));
+
+        var exitCode = await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        await session.Received(1).SendAsync("one", Arg.Any<CancellationToken>());
+        await session.Received(1).SendAsync("two", Arg.Any<CancellationToken>());
+        Assert.Equal(1, output.ToString().Split("Could not write to the chat log").Length - 1);
+        Assert.Contains("disk full", output.ToString());
+        Assert.Equal(1, failingWriter.WriteAttempts);
+    }
+
+    [Fact]
+    public async Task Should_NotLog_When_NoLogWasGiven()
+    {
+        var session = Substitute.For<IChatSession>();
+        session.IsConnected.Returns(true);
+        var runner = new ConsoleAppRunner(
+            [new ExitCommand()], session, ChatSession.DefaultPort, new StringReader("hello\n/exit\n"), new StringWriter(), new StringWriter());
+
+        var exitCode = await runner.RunAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        await session.Received(1).SendAsync("hello", Arg.Any<CancellationToken>());
+    }
+
+    private static ChatLog NewLog(StringWriter writer) => new(writer, "Alice", new FixedTimeProvider(FixedInstant));
+
+    private static string[] LogLines(StringWriter writer) =>
+        writer.ToString().Split(writer.NewLine, StringSplitOptions.RemoveEmptyEntries);
+
+    private sealed class FailingLogWriter : TextWriter
+    {
+        public int WriteAttempts { get; private set; }
+
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void WriteLine(string? value)
+        {
+            WriteAttempts++;
+            throw new IOException("disk full");
+        }
+    }
+
     private sealed class ThrowingTextWriter : TextWriter
     {
         public override Encoding Encoding => Encoding.UTF8;
 
         public override void WriteLine(string? value) => throw new IOException("broken pipe");
-    }
-
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
-    {
-        // Pinning LocalTimeZone to UTC alongside the fixed instant keeps GetLocalNow()
-        // deterministic regardless of the machine running the tests.
-        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
-
-        public override DateTimeOffset GetUtcNow() => now;
     }
 }
