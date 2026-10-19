@@ -8,6 +8,8 @@ the wire protocol.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
 ### Added
 
 - `--log <path>` appends a timestamped record of the conversation (messages in both directions
@@ -43,5 +45,6 @@ Initial alpha release.
   with the peer in a `NAME:` handshake.
 - A local-time `[HH:mm:ss]` timestamp on incoming messages.
 
-[Unreleased]: https://github.com/lgamorim/chatty2/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lgamorim/chatty2/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/lgamorim/chatty2/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lgamorim/chatty2/releases/tag/v0.1.0
