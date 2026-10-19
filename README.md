@@ -101,8 +101,10 @@ usage message, and exits with code 1 before anything starts listening. If writin
 carries on.
 
 The log is plain text on your disk with no rotation or encryption: anything said in the chat
-ends up in it, so treat the file accordingly. It is held open for appending while the app runs,
-which stops a second instance from opening the same file; give each instance its own.
+ends up in it, so treat the file accordingly. It is held open for appending while the app runs.
+On Windows that stops a second instance from opening the same file; other platforms may not
+enforce it, in which case both instances would append to it and their lines would interleave.
+Either way, give each instance its own file.
 
 ### Commands
 
