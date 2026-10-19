@@ -733,7 +733,7 @@ public class ConsoleAppRunnerTests
     }
 
     [Fact]
-    public async Task Should_NotLog_When_NoLogWasGiven()
+    public async Task Should_SendTheMessage_When_NoLogWasGiven()
     {
         var session = Substitute.For<IChatSession>();
         session.IsConnected.Returns(true);
