@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/lgamorim/chatty2/actions/workflows/ci.yml/badge.svg)](https://github.com/lgamorim/chatty2/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 
 _A console app for messaging another computer on the same local network (alpha)._
 
